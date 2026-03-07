@@ -1,0 +1,37 @@
+{
+    "name": "nomadicjosh/vihzhuo",
+    "description": "A drag and drop pagebuilder to manage pages in any PHP project.",
+    "keywords": [
+        "pagebuilder",
+        "phppagebuilder",
+        "php-pagebuilder",
+        "vihzhuo",
+        "elementor",
+        "divi",
+        "beaver-builder"
+    ],
+    "homepage": "https://github.com/nomadicjosh/vihzhuo",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Joshua Parker",
+            "email": "joshua@joshuaparker.dev"
+        }
+    ],
+    "require": {
+        "php": ">=8.4",
+        "spatie/menu": "^3.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Vihzhuo\\": "src/"
+        },
+        "files": [
+            "src/Core/helpers.php"
+        ]
+    },
+    "require-dev": {
+        "symfony/var-dumper": "^8.0"
+    }
+}
