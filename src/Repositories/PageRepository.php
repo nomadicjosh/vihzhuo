@@ -6,6 +6,8 @@ use Vihzhuo\Contracts\PageContract;
 use Vihzhuo\Contracts\PageRepositoryContract;
 use Exception;
 
+use function phpb_config;
+
 class PageRepository extends BaseRepository implements PageRepositoryContract
 {
     /**
@@ -159,9 +161,11 @@ class PageRepository extends BaseRepository implements PageRepositoryContract
      */
     public function findAllPages($id): array
     {
+        $prefix = phpb_config('storage.database.prefix');
+
         $query = $this->db->rawQuery(
-            query: "SELECT DISTINCT pages.id, pages.show_in_nav, pages.nav_position, pages.nav_type, page_translations.title, " .
-            "page_translations.route FROM pages JOIN page_translations ON pages.id = page_translations.{$id}"
+            query: "SELECT DISTINCT pages.id, pages.show_in_nav, pages.nav_position, pages.nav_type, trans.title, " .
+            "trans.route FROM {$prefix}pages AS pages JOIN {$prefix}page_translations AS trans ON pages.id = trans.{$id}"
         );
 
         return $query;
