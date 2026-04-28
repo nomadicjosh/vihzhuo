@@ -12,6 +12,8 @@ use Vihzhuo\Repositories\PageRepository;
 use Vihzhuo\Repositories\UploadRepository;
 use Exception;
 
+use function in_array;
+
 class PageBuilder implements PageBuilderContract
 {
     /**
@@ -130,6 +132,12 @@ class PageBuilder implements PageBuilderContract
     {
         $publicId = sha1(uniqid(rand(), true));
         $uploader = phpb_instance(Uploader::class, ['files']);
+
+        $allowedFileTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+        if(!in_array($uploader->file_src_mime, $allowedFileTypes)) {
+            die('Upload error. Mime type not allowed.');
+        }
+
         $uploader
             ->file_name($publicId . '/' . str_replace(' ', '-', $uploader->file_src_name))
             ->upload_to(phpb_config('storage.uploads_folder') . '/')
@@ -350,7 +358,7 @@ class PageBuilder implements PageBuilderContract
     {
         $data = $page->getBuilderData();
         $components = $data['components'] ?? [0 => []];
-        // backwards compatibility, components are now stored for each main container (@todo: remove this at the first mayor version)
+        // backwards compatibility, components are now stored for each main container
         if (isset($components[0]) && ! empty($components[0]) && ! isset($components[0][0])) {
             return [0 => $components];
         }
