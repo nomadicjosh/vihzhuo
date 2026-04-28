@@ -50,7 +50,7 @@ class BaseModel
      * @param PageContract|null $page
      * @param bool $forPageBuilder
      */
-    public function __construct(ThemeBlock $block, array $data = [], PageContract $page = null, bool $forPageBuilder = false)
+    public function __construct(ThemeBlock $block, array $data = [], ?PageContract $page = null, bool $forPageBuilder = false)
     {
         $this->block = $block;
         $this->data = is_array($data) ? $data : [];
@@ -92,7 +92,7 @@ class BaseModel
     /**
      * Return data of this block, passed as argument by a parent block.
      *
-     * @param $key
+     * @param mixed $key
      * @return string|null
      */
     public function data(mixed $key): ?string
