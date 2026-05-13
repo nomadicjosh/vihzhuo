@@ -29,6 +29,7 @@ return [
     'storage' => [
         'use_database' => true,
         'database' => [
+            'driver' => 'sqlite',
             'dsn'    => 'sqlite:vihzhuo.sqlite',
             'username'  => null,
             'password'  => null,
