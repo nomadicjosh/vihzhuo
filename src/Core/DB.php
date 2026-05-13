@@ -22,12 +22,16 @@ class DB
      */
     public function __construct(array $config)
     {
-        $this->pdo = new PDO(
+        $pdo = new PDO(
             $config['dsn'],
             $config['username'],
             $config['password'],
             $config['options']
         );
+        if(($config['driver'] ?? null) === 'sqlite') {
+            $pdo->exec('PRAGMA foreign_keys = ON');
+        }
+        $this->pdo = $pdo;
     }
 
     /**
