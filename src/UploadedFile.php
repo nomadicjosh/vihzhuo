@@ -2,7 +2,9 @@
 
 namespace Vihzhuo;
 
-class UploadedFile
+use stdClass;
+
+class UploadedFile extends stdClass
 {
     public string $public_id;
     public string $original_file;
