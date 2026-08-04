@@ -1191,7 +1191,7 @@ The browser integration smoke test is [`tests/Browser/grapesjs-smoke.html`](test
 
 Runtime templates are syntax-checked separately because their variables are injected at the view boundary. The typed application, front-controller example, and PHP tests are covered by PHPStan level `max`.
 
-For migration details, see [`UPGRADE.md`](UPGRADE.md). For the modernization inventory, see [`SCAN.md`](SCAN.md).
+For migration details, see [`UPGRADE.md`](UPGRADE.md).
 
 ## License
 
