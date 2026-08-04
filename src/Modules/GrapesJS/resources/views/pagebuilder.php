@@ -15,74 +15,105 @@
 
 <div id="gjs"></div>
 
-<!--<script type="text/javascript" src="https://cdn.ckeditor.com/4.21.0/full-all/ckeditor.js"></script>-->
-<script type="text/javascript" src="<?= phpb_asset('pagebuilder/ckeditor4-full-4.21.0/ckeditor.js') ?>"></script>
-<script type="text/javascript" src="<?= phpb_asset('pagebuilder/grapesjs-plugin-ckeditor-v0.0.10.min.js') ?>"></script>
-<script type="text/javascript" src="<?= phpb_asset('pagebuilder/grapesjs-touch-v0.1.1.min.js') ?>"></script>
 <script type="text/javascript">
-CKEDITOR.dtd.$editable.a = 1;
-CKEDITOR.dtd.$editable.b = 1;
-CKEDITOR.dtd.$editable.em = 1;
-CKEDITOR.dtd.$editable.button = 1;
-CKEDITOR.dtd.$editable.strong = 1;
-CKEDITOR.dtd.$editable.small = 1;
-CKEDITOR.dtd.$editable.span = 1;
-CKEDITOR.dtd.$editable.ol = 1;
-CKEDITOR.dtd.$editable.ul = 1;
-CKEDITOR.dtd.$editable.table = 1;
-
 <?php
 $currentLanguage = in_array(phpb_config('general.language'), phpb_active_languages()) ?
-    phpb_config('general.language') : array_keys(phpb_active_languages())[0];
+phpb_config('general.language') : array_keys(phpb_active_languages())[0];
 if (! empty($_SESSION['phpagebuilder_language'])) {
     $currentLanguage = $_SESSION['phpagebuilder_language'];
 }
 ?>
-window.languages = <?= json_encode(phpb_active_languages()) ?>;
-window.currentLanguage = <?= json_encode($currentLanguage) ?>;
-window.translations = <?= json_encode(phpb_trans('pagebuilder')) ?>;
-window.contentContainerComponents = <?= json_encode($pageBuilder->getPageComponents($page)) ?>;
-window.themeBlocks = <?= json_encode($blocks) ?>;
-window.blockSettings = <?= json_encode($blockSettings) ?>;
-window.pageBlocks = <?= json_encode($pageRenderer->getPageBlocksData()) ?>;
-window.pages = <?= json_encode($pageBuilder->getPages()) ?>;
-window.renderBlockUrl = '<?= phpb_url('pagebuilder', ['action' => 'renderBlock', 'page' => $page->getId()]) ?>';
-window.injectionScriptUrl = '<?= phpb_asset('pagebuilder/page-injection.js') ?>';
-window.renderLanguageVariantUrl = '<?= phpb_url('pagebuilder', ['action' => 'renderLanguageVariant', 'page' => $page->getId()]) ?>';
+window.languages = <?= phpb_json(phpb_active_languages()) ?>;
+window.currentLanguage = <?= phpb_json($currentLanguage) ?>;
+window.translations = <?= phpb_json(phpb_trans('pagebuilder')) ?>;
+window.contentContainerComponents = <?= phpb_json($pageBuilder->getPageComponents($page)) ?>;
+window.themeBlocks = <?= phpb_json($blocks) ?>;
+window.blockSettings = <?= phpb_json($blockSettings) ?>;
+window.pageBlocks = <?= phpb_json($pageRenderer->getPageBlocksData()) ?>;
+window.pages = <?= phpb_json($pageBuilder->getPages()) ?>;
+window.renderBlockUrl = <?= phpb_json(phpb_url('pagebuilder', ['action' => 'renderBlock', 'page' => $page->getId()])) ?>;
+window.injectionScriptUrl = <?= phpb_json(phpb_asset('pagebuilder/page-injection.js')) ?>;
+window.renderLanguageVariantUrl = <?= phpb_json(phpb_url('pagebuilder', ['action' => 'renderLanguageVariant', 'page' => $page->getId()])) ?>;
 
 <?php
 $config = require __DIR__ . '/grapesjs/config.php';
 ?>
-let config = <?= json_encode($config) ?>;
+let config = <?= phpb_json($config) ?>;
 if (window.customConfig !== undefined) {
-    config = $.extend(true, {}, window.customConfig, config);
+    config = $.extend(true, {}, config, window.customConfig);
 }
 
-window.initialComponents = <?= json_encode($pageRenderer->render()) ?>;
-window.initialStyle = <?= json_encode($pageBuilder->getPageStyleComponents($page)) ?>;
-window.initialCss = <?= json_encode($pageBuilder->getPageStyleCss($page)) ?>;
+// Keep the pre-1.0 plugin alias working and pass bundled plugins directly to
+// GrapesJS. String-based global registration is deprecated as of GrapesJS 0.23.
+const bundledPlugins = window.VihzhuoGrapesJS.plugins;
+config.plugins = (config.plugins || []).map(plugin => {
+    if (plugin === 'gjs-plugin-ckeditor' || plugin === 'grapesjs-plugin-ckeditor') {
+        return {id: 'grapesjs-plugin-ckeditor', plugin: bundledPlugins.ckeditor};
+    }
+    if (plugin === 'grapesjs-touch') {
+        return {id: 'grapesjs-touch', plugin: bundledPlugins.touch};
+    }
+    if (plugin === 'vihzhuo-rte') {
+        return {id: 'vihzhuo-rte', plugin: bundledPlugins.builtInRte};
+    }
+    return plugin;
+});
+if (config.pluginsOpts?.['gjs-plugin-ckeditor'] && !config.pluginsOpts['grapesjs-plugin-ckeditor']) {
+    config.pluginsOpts['grapesjs-plugin-ckeditor'] = config.pluginsOpts['gjs-plugin-ckeditor'];
+}
+
+window.initialComponents = <?= phpb_json($pageRenderer->render()) ?>;
+
+// GrapesJS renders component scripts independently. Move layout-level external
+// dependencies to the canvas configuration so they load serially (eg. jQuery,
+// then Popper, then Bootstrap) before the canvas body is mounted.
+const initialDocument = new DOMParser().parseFromString(window.initialComponents, 'text/html');
+const layoutScripts = [];
+initialDocument.querySelectorAll('script[src]').forEach(script => {
+    const source = script.getAttribute('src');
+    if (!source) return;
+
+    const descriptor = {src: new URL(source, <?= phpb_json(phpb_full_url($page->getRoute())) ?>).href};
+    ['type', 'integrity', 'crossorigin', 'referrerpolicy', 'nomodule'].forEach(attribute => {
+        if (script.hasAttribute(attribute)) {
+            descriptor[attribute] = script.getAttribute(attribute) || '';
+        }
+    });
+    layoutScripts.push(descriptor);
+    script.remove();
+});
+if (layoutScripts.length > 0) {
+    config.canvas = config.canvas || {};
+    config.canvas.scripts = [...(config.canvas.scripts || []), ...layoutScripts];
+    window.initialComponents = '<!doctype html>\n' + initialDocument.documentElement.outerHTML;
+}
+
+window.dispatchEvent(new CustomEvent('vihzhuo:grapesjs:before-init', { detail: config }));
+
+window.initialStyle = <?= phpb_json($pageBuilder->getPageStyleComponents($page)) ?>;
+window.initialCss = <?= phpb_json($pageBuilder->getPageStyleCss($page)) ?>;
 window.grapesJSTranslations = {
-    <?= $currentLanguage ?>: {
+    [<?= phpb_json($currentLanguage) ?>]: {
         styleManager: {
-            empty: '<?= phpb_trans('pagebuilder.style-no-element-selected') ?>'
+            empty: <?= phpb_json(phpb_trans('pagebuilder.style-no-element-selected')) ?>
         },
         traitManager: {
-            empty: '<?= phpb_trans('pagebuilder.trait-no-element-selected') ?>',
-            label: '<?= phpb_trans('pagebuilder.trait-settings') ?>',
+            empty: <?= phpb_json(phpb_trans('pagebuilder.trait-no-element-selected')) ?>,
+            label: <?= phpb_json(phpb_trans('pagebuilder.trait-settings')) ?>,
             traits: {
                 options: {
                     target: {
-                        false: '<?= phpb_trans('pagebuilder.no') ?>',
-                        _blank: '<?= phpb_trans('pagebuilder.yes') ?>'
+                        false: <?= phpb_json(phpb_trans('pagebuilder.no')) ?>,
+                        _blank: <?= phpb_json(phpb_trans('pagebuilder.yes')) ?>
                     }
                 }
             }
         },
         assetManager: {
-            addButton: '<?= phpb_trans('pagebuilder.asset-manager.add-image') ?>',
+            addButton: <?= phpb_json(phpb_trans('pagebuilder.asset-manager.add-image')) ?>,
             inputPlh: 'http://path/to/the/image.jpg',
-            modalTitle: '<?= phpb_trans('pagebuilder.asset-manager.modal-title') ?>',
-            uploadTitle: '<?= phpb_trans('pagebuilder.asset-manager.drop-files') ?>'
+            modalTitle: <?= phpb_json(phpb_trans('pagebuilder.asset-manager.modal-title')) ?>,
+            uploadTitle: <?= phpb_json(phpb_trans('pagebuilder.asset-manager.drop-files')) ?>
         }
     }
 };
@@ -91,6 +122,7 @@ window.grapesJSLoaded = false;
 window.editor = window.grapesjs.init(config);
 window.editor.on('load', function(editor) {
     window.grapesJSLoaded = true;
+    window.dispatchEvent(new CustomEvent('vihzhuo:grapesjs:ready', { detail: editor }));
 });
 window.editor.I18n.addMessages(window.grapesJSTranslations);
 
@@ -110,34 +142,34 @@ require __DIR__ . '/grapesjs/trait-manager.php';
 </button>
 <div id="sidebar-header">
     <?php
-    if (count(phpb_active_languages()) > 1):
-    ?>
+    if (count(phpb_active_languages()) > 1) :
+        ?>
     <div id="language-selector">
         <select class="selectpicker" data-width="fit">
-            <?php
-            foreach (phpb_active_languages() as $languageCode => $languageTranslation):
+        <?php
+        foreach (phpb_active_languages() as $languageCode => $languageTranslation) :
             ?>
             <option value="<?= phpb_e($languageCode) ?>" <?= $languageCode === $currentLanguage ? 'selected' : '' ?>
                     data-content='<span class="flag-icon flag-icon-<?= phpb_e($languageCode) ?>"></span><span class="language-name ml-1"><?= phpb_e($languageTranslation) ?></span>'>
                 >
-                <?= phpb_e($languageTranslation) ?>
+            <?= phpb_e($languageTranslation) ?>
             </option>
             <?php
-            endforeach;
-            ?>
+        endforeach;
+        ?>
         </select>
     </div>
-    <?php
+        <?php
     endif;
     ?>
     <style>
         <?php
-        foreach (phpb_active_languages() as $languageCode => $languageTranslation):
-        ?>
+        foreach (phpb_active_languages() as $languageCode => $languageTranslation) :
+            ?>
         .flag-icon-<?= $languageCode ?> {
             background-image: url(<?= phpb_asset('pagebuilder/images/flags/' . $languageCode . '.svg') ?>);
         }
-        <?php
+            <?php
         endforeach;
         ?>
     </style>

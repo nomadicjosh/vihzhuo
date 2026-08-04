@@ -1,7 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo;
 
+use FilesystemIterator;
+use SplFileInfo;
 use Vihzhuo\Contracts\CacheContract;
 
 class Cache implements CacheContract
@@ -25,12 +29,13 @@ class Cache implements CacheContract
                 return null;
             }
             $expiresAt = file_get_contents($currentPageCacheFolder . '/expires_at.txt');
-            if ($expiresAt < time()) {
+            if (!is_string($expiresAt) || !ctype_digit(trim($expiresAt)) || (int) $expiresAt < time()) {
                 $this->invalidate($relativeUrl);
                 return null;
             }
 
-            return file_get_contents($currentPageCacheFolder . '/page.html');
+            $content = file_get_contents($currentPageCacheFolder . '/page.html');
+            return is_string($content) ? $content : null;
         }
         // do not load a skeleton page if the request is a skeleton replacement request
         if (phpb_is_skeleton_data_request()) {
@@ -70,7 +75,7 @@ class Cache implements CacheContract
 
         $currentPageCacheFolder = $this->relativeToFullCachePath($currentPageCacheFolder);
         if (! is_dir($currentPageCacheFolder)) {
-            mkdir($currentPageCacheFolder, 0777, true);
+            mkdir($currentPageCacheFolder, 0775, true);
         }
         file_put_contents($currentPageCacheFolder . '/page.html', $pageContent);
         file_put_contents($currentPageCacheFolder . '/url.txt', $relativeUrl);
@@ -89,11 +94,13 @@ class Cache implements CacheContract
         // map empty url to the - root folder
         $relativeUrl = (empty($relativeUrl) || $relativeUrl === '/') ? '-' : $relativeUrl;
 
-        // use a cache path with folders based on the URL segments, to allow partial cache invalidation with a specific prefix
+        // use a cache path with folders based on the URL segments,
+        // to allow partial cache invalidation with a specific prefix
         $relativeUrlWithoutQueryString = explode('?', $relativeUrl)[0];
         $cachePath = phpb_slug($relativeUrlWithoutQueryString, true);
 
-        // suffix the cache path with a hash of the exact relative URL, to prevent returning wrong content due to slug collisions
+        // suffix the cache path with a hash of the exact relative URL,
+        // to prevent returning wrong content due to slug collisions
         $cachePath .= '/' . sha1($relativeUrl);
 
         return $returnRelative ? $cachePath : $this->relativeToFullCachePath($cachePath);
@@ -101,7 +108,8 @@ class Cache implements CacheContract
 
     protected function relativeToFullCachePath(string $relativeCachePath): string
     {
-        $cacheFolder = phpb_config('cache.folder');
+        $configuredFolder = phpb_config('cache.folder');
+        $cacheFolder = is_string($configuredFolder) ? $configuredFolder : '';
         if (!str_starts_with($relativeCachePath, '/')) {
             $cacheFolder .= '/';
         }
@@ -122,7 +130,8 @@ class Cache implements CacheContract
         }
 
         $cachePathWithoutHash = dirname($this->relativeToFullCachePath($cachePath));
-        $numberOfCachedPageVariants = count(glob("{$cachePathWithoutHash}/*", GLOB_ONLYDIR));
+        $variants = glob("{$cachePathWithoutHash}/*", GLOB_ONLYDIR);
+        $numberOfCachedPageVariants = is_array($variants) ? count($variants) : 0;
         return !(is_dir($cachePathWithoutHash) && $numberOfCachedPageVariants >= static::$maxCachedPageVariants);
     }
 
@@ -153,25 +162,27 @@ class Cache implements CacheContract
      */
     protected function removeDirectoryRecursive(string $path): bool
     {
-        // prevent removing data outside the cache folder
-        if (str_contains($path, '..') || !str_starts_with($path, phpb_config('cache.folder'))) {
-            return false;
-        }
-        if (! is_dir($path)) {
+        $configuredFolder = phpb_config('cache.folder');
+        $cacheRoot = is_string($configuredFolder) ? realpath($configuredFolder) : false;
+        $target = realpath($path);
+        if (
+            $cacheRoot === false || $target === false || $target === $cacheRoot
+            || !str_starts_with($target, $cacheRoot . DIRECTORY_SEPARATOR)
+        ) {
             return false;
         }
 
-        $path = str_ends_with($path, '/') ? $path : $path . '/';
-        $files = glob($path . '*', GLOB_MARK);
-        foreach ($files as $file) {
-            if (is_dir($file)) {
-                $this->removeDirectoryRecursive($file);
-            } else {
-                unlink($file);
+        foreach (new FilesystemIterator($target, FilesystemIterator::SKIP_DOTS) as $entry) {
+            if (!$entry instanceof SplFileInfo) {
+                continue;
             }
+            if ($entry->isLink() || $entry->isFile()) {
+                unlink($entry->getPathname());
+                continue;
+            }
+            $this->removeDirectoryRecursive($entry->getPathname());
         }
-        rmdir($path);
 
-        return true;
+        return rmdir($target);
     }
 }

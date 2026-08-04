@@ -66,3 +66,17 @@
     }
   }
 }
+
+.vihzhuo-selector-manager-property {
+  padding: 0;
+
+  > .gjs-sm-label {
+    display: none;
+  }
+
+  > .gjs-fields,
+  .vihzhuo-selector-manager-host,
+  .gjs-clm-tags {
+    width: 100%;
+  }
+}

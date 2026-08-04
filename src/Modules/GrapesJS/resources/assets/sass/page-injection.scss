@@ -32,14 +32,21 @@ span[draggable="true"] {
   }
 }
 
+// GrapesJS 0.23 renders both this legacy in-frame outline and a Canvas
+// selection spot. Keep the spot as the single source of selection feedback.
+[data-gjs-type].gjs-selected,
 [data-gjs-type].gjs-comp-selected {
-  outline: 1px solid #0091d1 !important;
-  outline-offset: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
-div[data-gjs-type].gjs-comp-selected {
-  outline: 1px solid #0091d1 !important;
-  outline-offset: -1px !important;
+
+// Embedded documents consume pointer events before GrapesJS can select their
+// component. In edit mode, pass clicks through to the block wrapper instead.
+[data-gjs-type="iframe"],
+iframe {
+  pointer-events: none;
 }
+
 [phpb-content-container],
 [phpb-blocks-container] {
   min-height: 50px;

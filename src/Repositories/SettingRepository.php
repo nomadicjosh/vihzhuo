@@ -1,9 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Repositories;
 
+use ReflectionException;
 use Vihzhuo\Contracts\SettingRepositoryContract;
+use Vihzhuo\SettingRecord;
 
+/** @extends BaseRepository<SettingRecord> */
 class SettingRepository extends BaseRepository implements SettingRepositoryContract
 {
     /**
@@ -11,15 +16,18 @@ class SettingRepository extends BaseRepository implements SettingRepositoryContr
      *
      * @var string
      */
-    protected $table = 'settings';
+    protected string $table = 'settings';
+    /** @var class-string<SettingRecord> */
+    protected string $class = SettingRecord::class;
 
     /**
      * Replace all website settings by the given data.
      *
-     * @param array $data
-     * @return bool|object|null
+     * @param array<string, mixed> $data
+     * @return bool
+     * @throws ReflectionException
      */
-    public function updateSettings(array $data)
+    public function updateSettings(array $data): bool
     {
         $this->destroyAll();
 
@@ -27,13 +35,18 @@ class SettingRepository extends BaseRepository implements SettingRepositoryContr
         foreach ($data as $key => $value) {
             $isArray = is_array($value);
             if ($isArray) {
-                $value = implode(',', $value);
+                $scalars = array_filter($value, static fn (mixed $item): bool => is_scalar($item));
+                $value = implode(',', array_map('strval', $scalars));
             }
 
-            $this->create([
-                    'setting' => $key,
-                    'value' => $value,
-                    'is_array' => $isArray,
+            if (!is_scalar($value) && $value !== null) {
+                continue;
+            }
+
+            $this->createRecord([
+                'setting' => $key,
+                'value' => $value === null ? '' : (string) $value,
+                'is_array' => $isArray,
             ]);
         }
 

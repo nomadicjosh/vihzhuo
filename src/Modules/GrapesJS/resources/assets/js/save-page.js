@@ -310,7 +310,11 @@ $(document).ready(function() {
 
         // remove all component's siblings since we only want to return the given component in storage format
         container.get('components').reset();
-        container.append(component);
+        // GrapesJS 0.23 moves an existing model when it is appended to another
+        // collection. Appending the live model here detached the block from
+        // the canvas before its settings refresh completed. Serialize a deep
+        // clone and keep the live component in its original parent.
+        container.append(window.cloneComponent(component));
 
         return getContainerContentInStorageFormat(container);
     };

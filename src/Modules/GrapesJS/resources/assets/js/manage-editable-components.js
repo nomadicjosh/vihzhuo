@@ -1,4 +1,44 @@
+import {activateSidebarTab, renderEmptyTraitsMessage} from './sidebar-panels';
+import {
+    enableEditableInteraction,
+    findInteractiveSelectionTarget,
+    selectSettingsOwnerFromElement,
+    synchronizeSettingsTarget,
+    synchronizeStyleTarget,
+} from './component-interactions';
+
 (function() {
+
+    /**
+     * Replace a component and return the first replacement model.
+     * GrapesJS 0.23 returns an array from Component#replaceWith.
+     */
+    function replaceWithFirst(component, replacement) {
+        let replacements = component.replaceWith(replacement);
+        if (! Array.isArray(replacements) || ! replacements[0]) {
+            throw new Error('GrapesJS did not return a replacement component.');
+        }
+        return replacements[0];
+    }
+
+    /**
+     * Ensure clicks on non-selectable children select their configured block.
+     * GrapesJS otherwise leaves the editor with no selection, so its stock
+     * TraitsView has no component from which to render Settings.
+     */
+    function installConfiguredBlockClickSelection() {
+        const canvasDocument = window.editor.Canvas.getDocument();
+        if (! canvasDocument || canvasDocument.__vihzhuoConfiguredBlockSelection) return;
+
+        canvasDocument.__vihzhuoConfiguredBlockSelection = true;
+        canvasDocument.addEventListener('click', function(event) {
+            if (event.detail > 1 || window.editor.getEditing() || ! event.target) return;
+            selectSettingsOwnerFromElement(window.editor, event.target);
+        });
+    }
+
+    window.editor.on('canvas:frame:load:body', installConfiguredBlockClickSelection);
+    installConfiguredBlockClickSelection();
 
     /**
      * After loading GrapesJS, add all theme blocks and activate the editable blocks in the main language.
@@ -182,13 +222,15 @@
         if (component.get('tagName') === 'phpb-block') {
             let id = component.attributes.attributes.id;
             if (window.pageBlocks[window.currentLanguage][id] !== undefined && window.pageBlocks[window.currentLanguage][id]['html'] !== undefined) {
-                newComponent = component.replaceWith(window.pageBlocks[window.currentLanguage][id]['html']);
+                newComponent = replaceWithFirst(component, window.pageBlocks[window.currentLanguage][id]['html']);
                 window.pageBlocks[window.currentLanguage][id]['html'] = '';
             }
         }
 
         // replace placeholders inside child components
         newComponent.get('components').each(childComponent => replacePlaceholdersForRenderedBlocks(childComponent));
+
+        return newComponent;
     }
 
     /**
@@ -209,31 +251,70 @@
     /**
      * Component select handler.
      */
+    let selectionRevision = 0;
+    window.editor.on('command:run:open-tm', function() {
+        const selected = window.editor.getSelected();
+        if (! selected) return;
+
+        const settingsTarget = synchronizeSettingsTarget(window.editor, selected);
+        window.requestAnimationFrame(function() {
+            renderEmptyTraitsMessage(
+                window.editor,
+                settingsTarget,
+                window.translations['trait-manager']['no-settings']
+            );
+        });
+    });
+
     window.editor.on('component:selected', function(component) {
-        // if the component has settings, activate settings panel in pagebuilder sidebar
-        if (componentHasBlockSettings(component)) {
-            $(".gjs-pn-buttons .gjs-pn-btn:nth-of-type(2)").click();
-        }
-        else if (component.get('type') === '' && componentHasBackground(component)) {
-            // on selecting a default component without settings, with editable background, show background styling
-            $(".gjs-pn-buttons .gjs-pn-btn:nth-of-type(3)").click();
-            if ($("#gjs-sm-position").hasClass("gjs-sm-open")) {
-                $("#gjs-sm-position").find(".gjs-sm-title").click();
-            }
-            if (! $("#gjs-sm-background").hasClass("gjs-sm-open")) {
-                $("#gjs-sm-background").find(".gjs-sm-title").click();
-            }
+        // The stock GrapesJS TraitsView ignores TraitManager.select(target) and
+        // renders traits from editor.getSelected(). Promote clicks on any child
+        // of a configured block to the owning block before updating the panels.
+        const settingsTarget = synchronizeSettingsTarget(window.editor, component);
+        if (settingsTarget !== component) return;
+
+        const interactionTarget = findInteractiveSelectionTarget(component);
+        if (interactionTarget && interactionTarget !== component) {
+            window.editor.select(interactionTarget);
+            return;
         }
 
-        // if component has no settings, add no settings text to settings panel in sidebar
-        if (! componentHasBlockSettings(component)) {
-            setTimeout(function() {
-                $(".gjs-trt-traits").html('<p class="no-settings">' + window.translations['trait-manager']['no-settings'] + '</p>');
-            }, 0);
-        }
+        const revision = ++selectionRevision;
+        const showStyleManager = Boolean(component.get('stylable'));
+        const hasBackground = showStyleManager && componentHasBackground(component);
 
-        // only show the toolbar buttons that are applicable
-        setTimeout(function() {
+        // GrapesJS updates the Trait and Style managers on the next event-loop
+        // turn. Waiting for the next frame avoids opening a panel against the
+        // previously selected component. The revision guard cancels stale work.
+        window.requestAnimationFrame(function() {
+            if (revision !== selectionRevision || window.editor.getSelected() !== component) return;
+
+            // Match the original page-builder workflow: configured block
+            // settings take precedence and open the native Trait Manager as
+            // soon as the block is selected.
+            synchronizeSettingsTarget(window.editor, settingsTarget);
+
+            if (componentHasBlockSettings(settingsTarget)) {
+                activateSidebarTab(window.editor, 'open-settings-button', 'open-tm');
+            } else if (showStyleManager) {
+                // GrapesJS refreshes its Style Manager target asynchronously.
+                // Verify it after that refresh so the first click never leaves
+                // the panel empty or pointing at the previous component.
+                synchronizeStyleTarget(window.editor, component);
+                activateSidebarTab(window.editor, 'open-style-button', 'open-sm');
+                const positionSector = window.editor.StyleManager.getSector('position');
+                const backgroundSector = window.editor.StyleManager.getSector('background');
+                positionSector?.set('open', ! hasBackground);
+                backgroundSector?.set('open', hasBackground);
+            }
+
+            renderEmptyTraitsMessage(
+                window.editor,
+                settingsTarget,
+                window.translations['trait-manager']['no-settings']
+            );
+
+            // Only show toolbar buttons that are applicable to this component.
             if (! component.attributes.removable) {
                 $(".gjs-toolbar .fa-trash-o.gjs-toolbar-item").hide();
             }
@@ -243,10 +324,6 @@
             if (! component.attributes.draggable) {
                 $(".gjs-toolbar .fa-arrows.gjs-toolbar-item").hide();
             }
-            if (! component.attributes.removable && ! component.attributes.copyable && ! component.attributes.draggable) {
-                window.editor.select(component.parent());
-            }
-
             let blockSlug = component.attributes['block-slug'];
             if (blockSlug && window.themeBlocks[blockSlug]) {
                 let labelHtml = window.themeBlocks[blockSlug]['label'];
@@ -255,7 +332,7 @@
                     $(".gjs-toolbar").attr('title', "Bloknaam: " + labelTextParts[1]);
                 }
             }
-        }, 0);
+        });
     });
 
 
@@ -313,7 +390,7 @@
      * @returns {boolean}
      */
     function componentHasBlockSettings(component) {
-        return component.attributes.traits.length > 0;
+        return component.getTraits().length > 0;
     }
 
     /**
@@ -341,6 +418,11 @@
         restrictEditAccess(droppedComponent);
 
         window.runScriptsOfComponentAndChildren(droppedComponent);
+
+        // The original <phpb-block> model was replaced above. GrapesJS still
+        // points its selection and Trait Manager at that removed model unless
+        // the rendered block root is selected explicitly.
+        window.editor.select(droppedComponent, {forceChange: true});
     });
 
     /**
@@ -363,7 +445,7 @@
                         // replace the <phpb-block> by the actual component
                         // the component is wrapped with a wrapper element to allow block styling (via a unique .style-identifier selector)
                         let wrapperElement = ('wrapper' in component.attributes.attributes) ? component.attributes.attributes['wrapper'] : 'div';
-                        blockRootComponent = component.replaceWith({tagName: wrapperElement});
+                        blockRootComponent = replaceWithFirst(component, {tagName: wrapperElement});
                         blockRootComponent.attributes['is-style-wrapper'] = true;
                         clone.components().each(function(componentChild) {
                             blockRootComponent.append(cloneComponent(componentChild));
@@ -377,9 +459,9 @@
                         // else, replace it by a wrapper div to allow block styling (via a unique .style-identifier selector)
                         if (clone.components().length === 1) {
                             let firstChild = cloneComponent(clone.components().models[0]);
-                            blockRootComponent = component.replaceWith(firstChild);
+                            blockRootComponent = replaceWithFirst(component, firstChild);
                         } else {
-                            blockRootComponent = component.replaceWith({tagName: 'div'});
+                            blockRootComponent = replaceWithFirst(component, {tagName: 'div'});
                             blockRootComponent.attributes['is-style-wrapper'] = true;
                             clone.components().each(function(componentChild) {
                                 blockRootComponent.append(cloneComponent(componentChild));
@@ -395,12 +477,15 @@
             addSettingsToSidebar(blockRootComponent);
             // recursive call to find and replace <phpb-block> elements of nested blocks (loaded via shortcodes)
             applyBlockAttributesToComponents(blockRootComponent);
+            return blockRootComponent;
         } else {
             component.components().each(function(childComponent) {
                 // recursive call to find and replace <phpb-block> elements of nested blocks (loaded via shortcodes)
                 applyBlockAttributesToComponents(childComponent);
             });
         }
+
+        return component;
     }
 
     /**
@@ -479,11 +564,15 @@
         component.attributes['is-updating'] = true;
         let settings = window.blockSettings[component.attributes['block-slug']];
         settings.forEach(function(setting) {
-            let trait = component.addTrait(setting);
+            // GrapesJS 0.23 always returns an array from addTrait(), including
+            // when only one trait definition is passed.
+            let trait = component.addTrait(setting)[0] || component.getTrait(setting['name']);
+            if (! trait) return;
+
             if (settingValues[setting['name']] !== undefined) {
-                trait.setTargetValue(settingValues[setting['name']]);
+                trait.setValue(settingValues[setting['name']]);
             } else if (setting['default-value'] !== undefined) {
-                trait.setTargetValue(setting['default-value']);
+                trait.setValue(setting['default-value']);
             }
         });
         component.attributes['is-updating'] = false;
@@ -543,25 +632,38 @@
                 language: window.currentLanguage
             },
             success: function(blockHtml) {
-                let blockId = $(blockHtml).attr('block-id');
+                // Preserve the stable instance ID. Treating an HTML response
+                // as one jQuery root can return no ID in GrapesJS 0.23 when
+                // the parsed response contains multiple nodes.
+                let blockId = getComponentBlockId(component);
+                if (! blockId) {
+                    blockId = $('<container>').append(blockHtml)
+                        .find('phpb-block[block-id]').first().attr('block-id');
+                }
+                if (! blockId) {
+                    $(component.getEl()).removeClass('gjs-freezed');
+                    component.attributes['is-updating'] = false;
+                    window.toastr.error(window.translations['toastr-component-update-failed']);
+                    return;
+                }
 
                 // set the block settings for the updated component to the new values
                 window.pageBlocks[window.currentLanguage][blockId] = (data.blocks[blockId] === undefined) ? {} : data.blocks[blockId];
 
                 // replace old component for the rendered html returned by the server
-                component.replaceWith(blockHtml);
-                replacePlaceholdersForRenderedBlocks(container);
-                applyBlockAttributesToComponents(container);
+                let replacedComponent = replaceWithFirst(component, blockHtml);
+                replacedComponent = replacePlaceholdersForRenderedBlocks(replacedComponent);
+                replacedComponent = applyBlockAttributesToComponents(replacedComponent);
                 restrictEditAccess(container, false, false);
 
                 // run builder scripts of the replaced component and all its children
-                let replacedComponent = findChildViaBlockIdsPath(container, [blockId]);
-                runScriptsOfComponentAndChildren(replacedComponent);
+                replacedComponent = findChildViaBlockIdsPath(container, [blockId]) || replacedComponent;
+                window.runScriptsOfComponentAndChildren(replacedComponent);
 
                 // select the component that was selected before the ajax call
                 relativeIds.push(blockId);
                 let componentToSelect = findChildViaBlockIdsPath(container, relativeIds.reverse());
-                window.editor.select(componentToSelect);
+                window.editor.select(componentToSelect || replacedComponent, {forceChange: true});
 
                 // trigger resize event to ensure all components are updated based on the new block settings
                 let iframeWindow = document.querySelector('iframe').contentWindow;
@@ -584,6 +686,9 @@
      * @returns {null|*}
      */
     function findChildViaBlockIdsPath(component, blockIds) {
+        if (! component || typeof component.components !== 'function') {
+            return null;
+        }
         if (blockIds.length === 0) {
             return component;
         }
@@ -591,7 +696,7 @@
         let result = null;
 
         component.components().each(function(child) {
-            if (child.attributes['block-id'] === blockIds[0]) {
+            if (getComponentBlockId(child) === blockIds[0]) {
                 result = findChildViaBlockIdsPath(child, blockIds.slice(1));
                 return false;
             }
@@ -606,6 +711,18 @@
         });
 
         return result;
+    }
+
+    /**
+     * Read a block ID from Vihzhuo component metadata or from the temporary
+     * parsed HTML attributes used during server-rendered block replacement.
+     */
+    function getComponentBlockId(component) {
+        if (! component || ! component.attributes) return null;
+
+        return component.attributes['block-id'] ||
+            component.attributes.attributes?.['block-id'] ||
+            null;
     }
 
     /**
@@ -691,6 +808,7 @@
             let permissions = {
                 selectable: true,
                 hoverable: true,
+                highlightable: true,
             };
             if (! directlyInsideDynamicBlock) {
                 // the block we entered is not located directly inside a dynamic block, hence this block can be removed, dragged, configured and styled
@@ -700,6 +818,7 @@
                     copyable: true,
                     selectable: true,
                     hoverable: true,
+                    highlightable: true,
                     stylable: true,
                 };
                 // for styling this particular block, the block needs to have a unique class
@@ -725,7 +844,8 @@
 
         // for raw content components, set editable to true and ignore processing editability for any child component
         if (component.attributes.attributes['data-raw-content'] !== undefined) {
-            component.set({editable: true});
+            enableEditableInteraction(component);
+            addUniqueClass(component);
             return;
         }
 
@@ -740,7 +860,7 @@
 
                 // refresh the current component in order to switch its component type to raw-content.
                 // this disables GrapesJS parsing of any child elements, avoiding that any GrapesJS specific html attributes are added
-                let newComponent = component.replaceWith(component.toHTML());
+                let newComponent = replaceWithFirst(component, component.toHTML());
                 // copy important attributes from the original component to the refreshed component
                 ['block-id', 'block-slug', 'is-html', 'style-identifier'].forEach(attribute => {
                     newComponent.attributes[attribute] = component.attributes[attribute];
@@ -783,21 +903,24 @@
         }
 
         if (textEditableTags.includes(htmlTag) || 'phpb-editable' in component.attributes.attributes) {
-            settings.editable = true;
+            enableEditableInteraction(component);
             component.attributes['made-text-editable'] = 'true';
         } else if (otherEditableTags.includes(htmlTag)) {
-            settings.editable = true;
+            enableEditableInteraction(component);
+            addUniqueClass(component);
         }
 
         if (componentHasBackground(component)) {
             settings.hoverable = true;
             settings.selectable = true;
+            settings.highlightable = true;
             settings.stylable = true;
         }
 
         if (htmlTag === 'a') {
             settings.hoverable = true;
             settings.selectable = true;
+            settings.highlightable = true;
             settings.stylable = true;
             settings.removable = true;
         }

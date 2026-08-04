@@ -1,6 +1,7 @@
 <?php
-$pagesTabActive = ! isset($_GET['tab']) || $_GET['tab'] === 'pages' ? 'active' : '';
-$settingsTabActive = isset($_GET['tab']) && $_GET['tab'] === 'settings' ? 'active' : '';
+$selectedTab = \Vihzhuo\Core\HttpContext::query('tab');
+$pagesTabActive = $selectedTab !== 'settings' ? 'active' : '';
+$settingsTabActive = $selectedTab === 'settings' ? 'active' : '';
 ?>
 <div class="py-5 text-center">
     <h2><?= phpb_trans('website-manager.title') ?></h2>

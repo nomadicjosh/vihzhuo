@@ -1,0 +1,15 @@
+parameters:
+    level: max
+    phpVersion: 80400
+    paths:
+        - src
+        - examples/index.php
+        - tests
+    excludePaths:
+        analyse:
+            - */resources/*
+            - src/Modules/GrapesJS/Thumb/generator-view.php
+    parallel:
+        maximumNumberOfProcesses: 1
+    treatPhpDocTypesAsCertain: true
+    reportUnmatchedIgnoredErrors: true

@@ -1,17 +1,23 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Modules\GrapesJS\Thumb;
 
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Qubus\Http\Factories\HtmlResponseFactory;
+use Qubus\Http\Factories\JsonResponseFactory;
+use Qubus\Http\Factories\TextResponseFactory;
+use Vihzhuo\Contracts\PageContract;
 use Vihzhuo\Contracts\ThemeContract;
+use Vihzhuo\Core\View;
 use Vihzhuo\Modules\GrapesJS\PageRenderer;
 use Vihzhuo\ThemeBlock;
 use Exception;
 
 class ThumbGenerator
 {
-    /**
-     * @var ?ThemeContract $theme
-     */
     protected ?ThemeContract $theme = null;
 
     /**
@@ -27,31 +33,38 @@ class ThumbGenerator
     /**
      * Handle requests to render and store block thumbnails.
      *
-     * @param string $action
-     * @return bool
+     * @param ServerRequestInterface $request
+     * @param string|null $action
+     * @return ResponseInterface|null
      * @throws Exception
      */
-    public function handleThumbRequest(string $action): bool
+    public function handleThumbRequest(ServerRequestInterface $request, ?string $action = null): ?ResponseInterface
     {
         phpb_set_in_editmode();
 
         if ($action === 'renderNextBlockThumb') {
-            $this->renderNextBlockThumb();
-            exit();
+            return $this->renderNextBlockThumb();
         }
-        if ($action !== 'upload' || !isset($_POST) || !isset($_POST['block']) || !isset($_POST['data'])) {
-            return false;
+        $body = $request->getParsedBody();
+        $body = is_array($body) ? $body : [];
+        $blockSlug = $body['block'] ?? null;
+        $data = $body['data'] ?? null;
+        if ($action !== 'upload' || !is_string($blockSlug) || !is_string($data)) {
+            return null;
         }
         foreach ($this->theme->getThemeBlocks() as $block) {
-            if ($_POST['block'] === $block->getSlug()) {
-                $this->r_mkdir(dirname($block->getThumbPath()));
+            if ($blockSlug === $block->getSlug()) {
+                $this->rmkDir(dirname($block->getThumbPath()));
                 $file = fopen($block->getThumbPath(), "wb");
-                fwrite($file, $this->getRawData($_POST['data']));
+                if ($file === false) {
+                    return JsonResponseFactory::create(['error' => 'Thumbnail could not be opened.'], 500);
+                }
+                fwrite($file, $this->getRawData($data));
                 fclose($file);
-                exit();
+                return JsonResponseFactory::create(['success' => true]);
             }
         }
-        return false;
+        return JsonResponseFactory::create(['error' => 'Block not found.'], 404);
     }
 
     /**
@@ -61,9 +74,9 @@ class ThumbGenerator
      * @param int $mode        Optional permissions
      * @return bool Success
      */
-    protected function r_mkdir(string $path, int $mode = 0777): bool
+    protected function rmkDir(string $path, int $mode = 0777): bool
     {
-        return is_dir($path) || ( $this->r_mkdir(dirname($path), $mode) && $this->_mkdir($path, $mode) );
+        return is_dir($path) || ( $this->rmkDir(dirname($path), $mode) && $this->mkDir($path, $mode) );
     }
 
     /**
@@ -73,7 +86,7 @@ class ThumbGenerator
      * @param int $mode        Optional permissions
      * @return bool Success
      */
-    protected function _mkdir(string $path, int $mode = 0777): bool
+    protected function mkDir(string $path, int $mode = 0777): bool
     {
         $old = umask(0);
         $res = @mkdir($path, $mode);
@@ -97,7 +110,7 @@ class ThumbGenerator
                 throw new Exception('Invalid image type');
             }
 
-            $data = base64_decode($data);
+            $data = base64_decode($data, true);
             if ($data === false) {
                 throw new Exception('Decode failed');
             }
@@ -111,29 +124,37 @@ class ThumbGenerator
      *
      * @throws Exception
      */
-    public function renderNextBlockThumb(): void
+    public function renderNextBlockThumb(): ResponseInterface
     {
         foreach ($this->theme->getThemeBlocks() as $block) {
-            $this->renderThumbForBlock($block);
+            $response = $this->renderThumbForBlock($block);
+            if ($response !== null) {
+                return $response;
+            }
         }
+        return TextResponseFactory::create('', 204);
     }
 
     /**
      * Render a thumbnail for the given block, if no thumb is present or if the thumb needs an update.
      *
      * @param ThemeBlock $block
+     * @return ResponseInterface|null
      * @throws Exception
      */
-    public function renderThumbForBlock(ThemeBlock $block): void
+    public function renderThumbForBlock(ThemeBlock $block): ?ResponseInterface
     {
         phpb_set_in_editmode();
 
         $thumbPath = $block->getThumbPath();
         if (file_exists($thumbPath)) {
-            return;
+            return null;
         }
 
         $page = phpb_instance('page');
+        if (!$page instanceof PageContract) {
+            return TextResponseFactory::create('Page implementation is unavailable.', 500);
+        }
         $page->setData([
             'layout' => 'master',
             'data' => [
@@ -144,11 +165,13 @@ class ThumbGenerator
         ]);
 
         $renderer = phpb_instance(PageRenderer::class, [$this->theme, $page]);
-        echo $renderer->render();
+        if (!$renderer instanceof PageRenderer) {
+            return TextResponseFactory::create('Page renderer is unavailable.', 500);
+        }
 
         $blockSlug = $block->getSlug();
-        require __DIR__ . '/generator-view.php';
-        exit();
+        return HtmlResponseFactory::create(
+            $renderer->render() . View::render(__DIR__ . '/generator-view.php', ['blockSlug' => $blockSlug])
+        );
     }
-
 }

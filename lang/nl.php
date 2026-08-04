@@ -66,6 +66,14 @@ return [
         'toastr-switching-language-failed' => 'Fout opgetreden bij het wisselen van taal',
         'yes' => 'Ja',
         'no' => 'Nee',
+        'rte' => [
+            'source' => 'HTML-broncode',
+            'source-title' => 'HTML-broncode bewerken',
+            'font-color' => 'Tekstkleur',
+            'font-size' => 'Lettergrootte',
+            'cancel' => 'Annuleren',
+            'apply' => 'Toepassen',
+        ],
         'trait-manager' => [
             'link' => [
                 'text' => 'Tekst',

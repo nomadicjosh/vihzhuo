@@ -6,12 +6,12 @@
     <div class="col-12">
         <form class="login-form mt-3" method="post" action="<?= phpb_url('auth', ['action' => 'login']) ?>">
             <?php
-            if (phpb_flash('message')):
-            ?>
+            if (phpb_flash('message')) :
+                ?>
             <div class="alert alert-<?= phpb_flash('message-type') ?>">
                 <?= phpb_flash('message') ?>
             </div>
-            <?php
+                <?php
             endif;
             ?>
 

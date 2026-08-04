@@ -1,38 +1,44 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo;
 
+use ReflectionException;
 use Vihzhuo\Contracts\PageContract;
+use Vihzhuo\Contracts\CacheContract;
 use Vihzhuo\Repositories\PageTranslationRepository;
+
+use function Qubus\Support\Helpers\is_null__;
+
+use const ARRAY_FILTER_USE_KEY;
 
 class Page implements PageContract
 {
-    /**
-     * @var array|null $attributes
-     */
-    protected ?array $attributes;
+    /** @var array<string, mixed>|null */
+    protected ?array $attributes = null;
 
-    /**
-     * @var array|null $translations
-     */
+    /** @var array<string, array<string, mixed>>|null */
     protected ?array $translations = null;
 
     /**
      * Set the data stored for this page.
      *
-     * @param array|null $data
-     * @param bool $fullOverwrite       whether to fully overwrite or extend existing data
+     * @param array<string, mixed>|null $data
+     * @param bool $fullOverwrite Whether to fully overwrite or extend existing data
      */
     public function setData(?array $data = null, bool $fullOverwrite = true): void
     {
         // if page builder data is set, try to decode json
         if (isset($data['data']) && is_string($data['data'])) {
-            $data['data'] = json_decode($data['data'], true);
+            $decoded = json_decode($data['data'], true);
+            $data['data'] = is_array($decoded) ? $decoded : [];
         }
+
         if ($fullOverwrite) {
-            $this->attributes = $data;
-        }  elseif (is_array($data)) {
-            $this->attributes = is_null($this->attributes) ? [] : $this->attributes;
+            $this->attributes = $data === null ? null : array_filter($data, 'is_string', ARRAY_FILTER_USE_KEY);
+        } elseif (is_array($data)) {
+            $this->attributes = is_null__($this->attributes) ? [] : $this->attributes;
             foreach ($data as $key => $value) {
                 $this->attributes[$key] = $value;
             }
@@ -42,7 +48,7 @@ class Page implements PageContract
     /**
      * Set the translation data of this page.
      *
-     * @param array|null $translationData
+     * @param array<string, array<string, mixed>>|null $translationData
      */
     public function setTranslations(?array $translationData = null): void
     {
@@ -52,7 +58,7 @@ class Page implements PageContract
     /**
      * Return all data stored for this page (page builder data and other data set via setData).
      *
-     * @return array|null
+     * @return array<string, mixed>|null
      */
     public function getData(): ?array
     {
@@ -62,11 +68,12 @@ class Page implements PageContract
     /**
      * Return the page builder data stored for this page.
      *
-     * @return array|null
+     * @return array<string, mixed>
      */
-    public function getBuilderData(): ?array
+    public function getBuilderData(): array
     {
-        return $this->attributes['data'] ?? [];
+        $data = $this->attributes['data'] ?? [];
+        return is_array($data) ? array_filter($data, 'is_string', ARRAY_FILTER_USE_KEY) : [];
     }
 
     /**
@@ -76,7 +83,8 @@ class Page implements PageContract
      */
     public function getId(): string
     {
-        return $this->get('id');
+        $id = $this->get('id');
+        return is_scalar($id) ? (string) $id : '';
     }
 
     /**
@@ -86,7 +94,8 @@ class Page implements PageContract
      */
     public function getName(): string
     {
-        return $this->get('name');
+        $name = $this->get('name');
+        return is_string($name) ? $name : '';
     }
 
     /**
@@ -96,22 +105,26 @@ class Page implements PageContract
      */
     public function getLayout(): string
     {
-        return $this->get('layout');
+        $layout = $this->get('layout');
+        return is_string($layout) ? $layout : '';
     }
 
     /**
      * Return the translated settings of this page.
      *
-     * @return array
+     * @return array<string, array<string, mixed>>
+     * @throws ReflectionException
      */
     public function getTranslations(): array
     {
-        if (is_null($this->translations)) {
-            $records = (new PageTranslationRepository)->findWhere(phpb_config('page.translation.foreign_key'), $this->getId());
+        if ($this->translations === null) {
+            $foreignKey = phpb_config('page.translation.foreign_key');
+            $records = new PageTranslationRepository()
+                ->findWhere(is_string($foreignKey) ? $foreignKey : 'page_id', $this->getId());
             $translations = [];
             foreach ($records as $record) {
-                if (in_array($record->locale, array_keys(phpb_active_languages()))) {
-                    $translations[$record->locale] = (array) $record;
+                if (isset(phpb_active_languages()[$record->getLocale()])) {
+                    $translations[$record->getLocale()] = $record->toArray();
                 }
             }
             $this->translations = $translations;
@@ -124,7 +137,8 @@ class Page implements PageContract
      *
      * @param string $setting
      * @param string|null $locale
-     * @return mixed|string|null
+     * @return mixed
+     * @throws ReflectionException
      */
     public function getTranslation(string $setting, ?string $locale = null): mixed
     {
@@ -132,41 +146,44 @@ class Page implements PageContract
         if (empty($translations)) {
             return null;
         }
-        $locale = $locale ?? phpb_config('general.language');
+        $configuredLocale = phpb_config('general.language');
+        $locale ??= is_string($configuredLocale) ? $configuredLocale : 'en';
+
         return $translations[$locale][$setting] ??
-            $translations['en'][$setting] ??
-            $translations[array_keys($translations)[0]][$setting] ??
-            null;
+        $translations['en'][$setting] ??
+        $translations[array_keys($translations)[0]][$setting] ??
+        null;
     }
 
     /**
      * Return the route of this page.
      *
      * @param string|null $locale
-     * @return mixed|string|null
+     * @return string
+     * @throws ReflectionException
      */
-    public function getRoute(?string $locale = null): mixed
+    public function getRoute(?string $locale = null): string
     {
         $routeTranslation = $this->getTranslation('route', $locale);
         foreach (phpb_route_parameters() as $routeParameter => $value) {
-            $routeTranslation = str_replace('{' . $routeParameter . '}', $value, $routeTranslation);
+            $routeTranslation = str_replace(
+                '{' . $routeParameter . '}',
+                $value,
+                is_string($routeTranslation) ? $routeTranslation : ''
+            );
         }
-        return $routeTranslation;
+        return is_string($routeTranslation) ? $routeTranslation : '';
     }
 
     /**
      * Get the value of the given property of this Page.
      *
-     * @param $property
+     * @param string $property
      * @return mixed|null
      */
-    public function get($property): mixed
+    public function get(string $property): mixed
     {
-        if (property_exists($this, $property)) {
-            return $this->{$property};
-        }
-
-        if ($this->attributes && is_array($this->attributes)) {
+        if ($this->attributes !== null) {
             return $this->attributes[$property] ?? null;
         }
 
@@ -175,10 +192,15 @@ class Page implements PageContract
 
     /**
      * Invalidate all cached variants of this page.
+     *
+     * @throws ReflectionException
      */
     public function invalidateCache(): void
     {
         $cache = phpb_instance('cache');
+        if (!$cache instanceof CacheContract) {
+            return;
+        }
 
         foreach ($this->getTranslations() as $locale => $translationData) {
             $languageRoute = $this->getRoute($locale);

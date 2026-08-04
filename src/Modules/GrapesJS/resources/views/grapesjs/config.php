@@ -96,27 +96,17 @@ return [
             phpb_asset('pagebuilder/page-injection.css'),
         ],
     ],
-    'plugins' => ['grapesjs-touch', 'gjs-plugin-ckeditor'],
+    'plugins' => ['grapesjs-touch', 'vihzhuo-rte'],
     'pluginsOpts' => [
-        'gjs-plugin-ckeditor' => [
-            'position' => 'left',
-            'options' => [
-                'startupFocus' => true,
-                'allowedContent' => true,
-                //'forcePasteAsPlainText' => false, // when true does not copy UL, random JS errors while pasting
-                //'extraAllowedContent' => '*(*);*[*];ul ol li span', // allows classes, inline styles and certain elements
-                //'enterMode' => 'CKEDITOR.ENTER_BR', // issues on pasting in Chromes
-                'extraPlugins' => 'sourcedialog',
-                'removePlugins' => 'exportpdf,magicline',
-                'toolbar' => [
-                    ['Bold', 'Italic', 'Underline', 'Strike', 'Undo', 'Redo'],
-                    ['Link', 'Unlink'],
-                    ['NumberedList', 'BulletedList'],
-                    ['JustifyLeft', 'JustifyCenter', 'JustifyRight', 'JustifyBlock'],
-                    ['FontSize', 'TextColor'],
-                    ['Sourcedialog']
-                ],
-            ]
-        ]
+        'vihzhuo-rte' => [
+            'labels' => [
+                'source' => phpb_trans('pagebuilder.rte.source'),
+                'sourceTitle' => phpb_trans('pagebuilder.rte.source-title'),
+                'fontColor' => phpb_trans('pagebuilder.rte.font-color'),
+                'fontSize' => phpb_trans('pagebuilder.rte.font-size'),
+                'cancel' => phpb_trans('pagebuilder.rte.cancel'),
+                'apply' => phpb_trans('pagebuilder.rte.apply'),
+            ],
+        ],
     ]
 ];

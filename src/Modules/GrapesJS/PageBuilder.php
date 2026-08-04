@@ -1,39 +1,47 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Modules\GrapesJS;
 
+use JsonException;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Message\UploadedFileInterface;
+use Qubus\Http\Factories\HtmlResponseFactory;
+use Qubus\Http\Factories\JsonResponseFactory;
+use Qubus\Http\Factories\TextResponseFactory;
+use ReflectionException;
 use Vihzhuo\Contracts\PageBuilderContract;
 use Vihzhuo\Contracts\PageContract;
 use Vihzhuo\Contracts\ThemeContract;
 use Vihzhuo\Modules\GrapesJS\Block\BlockAdapter;
 use Vihzhuo\Modules\GrapesJS\Thumb\ThumbGenerator;
-use Vihzhuo\Modules\GrapesJS\Upload\Uploader;
+use Vihzhuo\Core\View;
 use Vihzhuo\Repositories\PageRepository;
 use Vihzhuo\Repositories\UploadRepository;
 use Exception;
 
 use function in_array;
 
+use const DIRECTORY_SEPARATOR;
+use const FILEINFO_MIME_TYPE;
+use const UPLOAD_ERR_OK;
+
 class PageBuilder implements PageBuilderContract
 {
-    /**
-     * @var ?ThemeContract $theme
-     */
     protected ?ThemeContract $theme = null;
 
     /**
-     * @var array $scripts
+     * @var array<string, string>
      */
     protected array $scripts = [];
 
     /**
-     * @var array $pages
+     * @var list<array{string, string}>
      */
     protected array $pages = [];
 
-    /**
-     * @var ?string $css
-     */
     protected ?string $css = null;
 
     /**
@@ -41,10 +49,13 @@ class PageBuilder implements PageBuilderContract
      */
     public function __construct()
     {
-        $this->theme = phpb_instance('theme', [
-            phpb_config('theme'),
-            phpb_config('theme.active_theme')
-        ]);
+        $themeConfig = phpb_config('theme');
+        $themeSlug = phpb_config('theme.active_theme');
+        $theme = phpb_instance(
+            'theme',
+            [is_array($themeConfig) ? $themeConfig : [], is_string($themeSlug) ? $themeSlug : '']
+        );
+        $this->theme = $theme instanceof ThemeContract ? $theme : null;
     }
 
     /**
@@ -60,67 +71,89 @@ class PageBuilder implements PageBuilderContract
     /**
      * Process the current GET or POST request and redirect or render the requested page.
      *
-     * @param $route
-     * @param $action
+     * @param ServerRequestInterface $request
+     * @param string|null $route
+     * @param string|null $action
      * @param PageContract|null $page
-     * @return bool
+     * @return ResponseInterface|null
+     * @throws JsonException
      * @throws Exception
      */
-    public function handleRequest($route, $action, ?PageContract $page = null): bool
-    {
+    public function handleRequest(
+        ServerRequestInterface $request,
+        ?string $route = null,
+        ?string $action = null,
+        ?PageContract $page = null
+    ): ?ResponseInterface {
         phpb_set_in_editmode();
 
         if ($route === 'thumb_generator') {
-            $thumbGenerator = new ThumbGenerator($this->theme);
-            return $thumbGenerator->handleThumbRequest($action);
+            $thumbGenerator = new ThumbGenerator($this->requireTheme());
+            return $thumbGenerator->handleThumbRequest($request, $action);
         }
 
-        if (is_null($page)) {
-            $pageId = $_GET['page'] ?? null;
-            $pageRepository = new PageRepository;
-            $page = $pageRepository->findWithId($pageId);
+        if ($page === null) {
+            $pageId = $request->getQueryParams()['page'] ?? null;
+            $pageRepository = new PageRepository();
+            $page = (is_int($pageId) || is_string($pageId)) ? $pageRepository->findWithId($pageId) : null;
         }
         if (! ($page instanceof PageContract)) {
-            return false;
+            return null;
         }
+
+        $body = $request->getParsedBody();
+        $body = is_array($body) ? $body : [];
 
         switch ($action) {
             case null:
             case 'edit':
-                $this->renderPageBuilder($page);
-                exit();
+                return $this->renderPageBuilder($page);
             case 'store':
-                if (isset($_POST) && isset($_POST['data'])) {
-                    $data = json_decode($_POST['data'], true);
-                    $this->updatePage($page, $data);
-                    exit();
+                if (is_string($body['data'] ?? null)) {
+                    $data = json_decode($body['data'], true, 512, JSON_THROW_ON_ERROR);
+                    if (!is_array($data)) {
+                        return TextResponseFactory::create('Invalid page data.', 422);
+                    }
+                    $this->updatePage($page, $this->stringKeyedArray($data));
+                    return JsonResponseFactory::create(['success' => true]);
                 }
                 break;
             case 'upload':
-                if (isset($_FILES)) {
-                    $this->handleFileUpload();
-                }
-                break;
+                return $this->handleFileUpload($request);
             case 'upload_delete':
-                if (isset($_POST['id'])) {
-                    $this->handleFileDelete();
+                if (is_string($body['id'] ?? null)) {
+                    return $this->handleFileDelete($body['id']);
                 }
                 break;
             case 'renderBlock':
-                if (isset($_POST['language']) && isset($_POST['data']) && isset(phpb_active_languages()[$_POST['language']])) {
-                    $this->renderPageBuilderBlock($page, $_POST['language'], json_decode($_POST['data'], true));
-                    exit();
+                if (
+                    is_string($body['language'] ?? null) && is_string($body['data'] ?? null)
+                    && isset(phpb_active_languages()[$body['language']])
+                ) {
+                    $data = json_decode($body['data'], true, 512, JSON_THROW_ON_ERROR);
+                    return $this->renderPageBuilderBlock(
+                        $page,
+                        $body['language'],
+                        is_array($data) ? $this->stringKeyedArray($data) : []
+                    );
                 }
                 break;
             case 'renderLanguageVariant':
-                if (isset($_POST['language']) && isset($_POST['data']) && isset(phpb_active_languages()[$_POST['language']])) {
-                    $this->renderLanguageVariant($page, $_POST['language'], json_decode($_POST['data'], true));
-                    exit();
+                if (
+                    is_string($body['language'] ?? null) && is_string($body['data'] ?? null)
+                    && isset(phpb_active_languages()[$body['language']])
+                ) {
+                    $data = json_decode($body['data'], true, 512, JSON_THROW_ON_ERROR);
+                    return $this->renderLanguageVariant(
+                        $page,
+                        $body['language'],
+                        is_array($data) ? $this->stringKeyedArray($data) : []
+                    );
                 }
                 break;
         }
 
-        return false;
+        return null;
     }
 
     /**
@@ -128,103 +161,129 @@ class PageBuilder implements PageBuilderContract
      *
      * @throws Exception
      */
-    public function handleFileUpload(): void
+    public function handleFileUpload(ServerRequestInterface $request): ResponseInterface
     {
-        $publicId = sha1(uniqid(rand(), true));
-        $uploader = phpb_instance(Uploader::class, ['files']);
-
+        $uploaded = $request->getUploadedFiles()['files'] ?? null;
+        if (is_array($uploaded)) {
+            $uploaded = reset($uploaded);
+        }
+        if (!$uploaded instanceof UploadedFileInterface || $uploaded->getError() !== UPLOAD_ERR_OK) {
+            return JsonResponseFactory::create(['error' => 'No valid upload was provided.'], 422);
+        }
+        $originalName = basename($uploaded->getClientFilename() ?? 'upload');
+        $temporaryPath = $uploaded->getStream()->getMetadata('uri');
+        $mime = is_string($temporaryPath) ? new \finfo(FILEINFO_MIME_TYPE)->file($temporaryPath) : false;
         $allowedFileTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-        if(!in_array($uploader->file_src_mime, $allowedFileTypes)) {
-            die('Upload error. Mime type not allowed.');
+        if (!is_string($mime) || !in_array($mime, $allowedFileTypes, true)) {
+            return JsonResponseFactory::create(['error' => 'Upload MIME type is not allowed.'], 415);
         }
-
-        $uploader
-            ->file_name($publicId . '/' . str_replace(' ', '-', $uploader->file_src_name))
-            ->upload_to(phpb_config('storage.uploads_folder') . '/')
-            ->run();
-
-        if (! $uploader->was_uploaded) {
-            die("Upload error: {$uploader->error}");
+        $uploadsFolder = phpb_config('storage.uploads_folder');
+        if (!is_string($uploadsFolder)) {
+            return JsonResponseFactory::create(['error' => 'Upload storage is not configured.'], 500);
         }
-        $originalFile = str_replace(' ', '-', $uploader->file_src_name);
-        $originalMime = $uploader->file_src_mime;
-        $serverFile = $uploader->final_file_name;
+        $publicId = bin2hex(random_bytes(20));
+        $originalFile = str_replace(' ', '-', $originalName);
+        $relativeFile = $publicId . '/' . $originalFile;
+        $targetDirectory = rtrim($uploadsFolder, '/') . '/' . $publicId;
+        if (!is_dir($targetDirectory) && !mkdir($targetDirectory, 0775, true) && !is_dir($targetDirectory)) {
+            return JsonResponseFactory::create(['error' => 'Upload directory could not be created.'], 500);
+        }
+        $uploaded->moveTo($targetDirectory . '/' . $originalFile);
 
-        $uploadRepository = new UploadRepository;
+        $uploadRepository = new UploadRepository();
         $uploadedFile = $uploadRepository->create([
             'public_id' => $publicId,
             'original_file' => $originalFile,
-            'mime_type' => $originalMime,
-            'server_file' => $serverFile
+            'mime_type' => $mime,
+            'server_file' => $relativeFile
         ]);
-
-        echo json_encode([
+        if (!$uploadedFile instanceof \Vihzhuo\UploadedFile) {
+            return JsonResponseFactory::create(['error' => 'Upload metadata could not be stored.'], 500);
+        }
+        return JsonResponseFactory::create([
             'data' => [
                 'public_id' => $publicId,
                 'src' => $uploadedFile->getUrl(),
                 'type' => 'image'
             ]
         ]);
-        exit();
     }
 
     /**
      * Handle deleting of the posted previously uploaded file.
+     *
+     * @throws Exception
      */
-    public function handleFileDelete(): void
+    public function handleFileDelete(string $publicId): ResponseInterface
     {
-        $uploadRepository = new UploadRepository;
-        $uploadedFileResult = $uploadRepository->findWhere('public_id', $_POST['id']);
+        $uploadRepository = new UploadRepository();
+        $uploadedFileResult = $uploadRepository->findWhere('public_id', $publicId);
         if (empty($uploadedFileResult)) {
-            echo json_encode([
+            return JsonResponseFactory::create([
                 'success' => false,
                 'message' => 'File not found'
-            ]);
-            exit();
+            ], 404);
         }
 
         $uploadedFile = $uploadedFileResult[0];
         $uploadRepository->destroy($uploadedFile->id);
 
-        $serverFilePath = realpath(phpb_config('storage.uploads_folder') . '/' . $uploadedFile->server_file);
-        if ($serverFilePath) {
+        $uploadsFolder = phpb_config('storage.uploads_folder');
+        if (!is_string($uploadsFolder)) {
+            return JsonResponseFactory::create(['error' => 'Upload storage is not configured.'], 500);
+        }
+        $uploadRoot = realpath($uploadsFolder);
+        $serverFilePath = realpath($uploadsFolder . '/' . $uploadedFile->server_file);
+        if (
+            $uploadRoot !== false && $serverFilePath !== false
+            && str_starts_with($serverFilePath, $uploadRoot . DIRECTORY_SEPARATOR)
+        ) {
             unlink($serverFilePath);
         }
 
-        $parentDirectory = realpath(phpb_config('storage.uploads_folder') . '/' . dirname($uploadedFile->server_file));
-        if ($parentDirectory && dirname($uploadedFile->server_file) !== '.') {
+        $parentDirectory = realpath($uploadsFolder . '/' . dirname($uploadedFile->server_file));
+        if (
+            $uploadRoot !== false && $parentDirectory !== false
+            && str_starts_with($parentDirectory, $uploadRoot . DIRECTORY_SEPARATOR)
+            && dirname($uploadedFile->server_file) !== '.'
+        ) {
             rmdir($parentDirectory);
         }
 
-        echo json_encode([
+        return JsonResponseFactory::create([
             'success' => true
         ]);
-        exit();
     }
 
     /**
      * Render the PageBuilder for the given page.
      *
      * @param PageContract $page
+     * @return ResponseInterface
      * @throws Exception
      */
-    public function renderPageBuilder(PageContract $page): void
+    public function renderPageBuilder(PageContract $page): ResponseInterface
     {
         phpb_set_in_editmode();
 
         // init variables that should be accessible in the view
         $pageBuilder = $this;
-        $pageRenderer = phpb_instance(PageRenderer::class, [$this->theme, $page, true]);
-        if (! empty($_SESSION['phpagebuilder_language'])) {
+        $pageRenderer = $this->pageRenderer($page, true);
+        if (is_string($_SESSION['phpagebuilder_language'] ?? null)) {
             $pageRenderer->setLanguage($_SESSION['phpagebuilder_language']);
         }
 
         // create an array of theme blocks and theme block settings for in the page builder sidebar
         $blocks = [];
         $blockSettings = [];
-        foreach ($this->theme->getThemeBlocks() as $themeBlock) {
+        foreach ($this->requireTheme()->getThemeBlocks() as $themeBlock) {
             $slug = phpb_e($themeBlock->getSlug());
-            $adapter = phpb_instance(BlockAdapter::class, [$pageRenderer, $themeBlock]);
+            $customAdapter = phpb_instance(BlockAdapter::class, [$pageRenderer, $themeBlock]);
+
+            $adapter = $customAdapter instanceof BlockAdapter
+            ? $customAdapter
+            : new BlockAdapter($pageRenderer, $themeBlock);
+
             if ($themeBlock->get('hidden') !== true) {
                 $blocks[$slug] = $adapter->getBlockManagerArray();
             }
@@ -233,27 +292,35 @@ class PageBuilder implements PageBuilderContract
 
         // create an array of all uploaded assets
         $assets = [];
-        foreach ((new UploadRepository)->getAll() as $file) {
+        foreach (new UploadRepository()->getAll() as $file) {
             $assets[] = [
                 'src' => $file->getUrl(),
                 'public_id' => $file->public_id
             ];
         }
 
-        require __DIR__ . '/resources/views/layout.php';
+        return HtmlResponseFactory::create(View::render(__DIR__ . '/resources/views/layout.php', compact(
+            'pageBuilder',
+            'pageRenderer',
+            'blocks',
+            'blockSettings',
+            'assets',
+            'page'
+        )));
     }
 
     /**
      * Render the given page.
      *
      * @param PageContract $page
-     * @param null $language
+     * @param string|null $language
      * @return string
+     * @throws Exception
      */
-    public function renderPage(PageContract $page, $language = null): string
+    public function renderPage(PageContract $page, ?string $language = null): string
     {
-        $pageRenderer = phpb_instance(PageRenderer::class, [$this->theme, $page]);
-        if (! is_null($language)) {
+        $pageRenderer = $this->pageRenderer($page);
+        if ($language !== null) {
             $pageRenderer->setLanguage($language);
         }
         return $pageRenderer->render();
@@ -264,19 +331,25 @@ class PageBuilder implements PageBuilderContract
      *
      * @param PageContract $page
      * @param string $language
-     * @param array $blockData
+     * @param array<string, mixed> $blockData
+     * @return ResponseInterface
      * @throws Exception
      */
-    public function renderPageBuilderBlock(PageContract $page, string $language, array $blockData = []): void
-    {
+    public function renderPageBuilderBlock(
+        PageContract $page,
+        string $language,
+        array $blockData = []
+    ): ResponseInterface {
         phpb_set_in_editmode();
 
-        $blockData = is_array($blockData) ? $blockData : [];
         $page->setData(['data' => $blockData], false);
 
-        $pageRenderer = phpb_instance(PageRenderer::class, [$this->theme, $page, true]);
+        $pageRenderer = $this->pageRenderer($page, true);
         $pageRenderer->setLanguage($language);
-        echo $pageRenderer->parseShortcodes($blockData['html'], $blockData['blocks']);
+        $html = is_string($blockData['html'] ?? null) ? $blockData['html'] : '';
+        $storedBlocks = $blockData['blocks'] ?? null;
+        $blocks = is_array($storedBlocks) ? $this->stringKeyedArray($storedBlocks) : [];
+        return HtmlResponseFactory::create($pageRenderer->parseShortcodes($html, $blocks));
     }
 
     /**
@@ -284,21 +357,24 @@ class PageBuilder implements PageBuilderContract
      *
      * @param PageContract $page
      * @param string $language
-     * @param array $blockData
+     * @param array<string, mixed> $blockData
+     * @return ResponseInterface
      * @throws Exception
      */
-    public function renderLanguageVariant(PageContract $page, string $language, array $blockData = []): void
-    {
+    public function renderLanguageVariant(
+        PageContract $page,
+        string $language,
+        array $blockData = []
+    ): ResponseInterface {
         phpb_set_in_editmode();
         $_SESSION['phpagebuilder_language'] = $language;
 
-        $blockData = is_array($blockData) ? $blockData : [];
         $page->setData(['data' => $blockData], false);
 
-        $pageRenderer = phpb_instance(PageRenderer::class, [$this->theme, $page, true]);
+        $pageRenderer = $this->pageRenderer($page, true);
         $pageRenderer->setLanguage($language);
-        echo json_encode([
-            'dynamicBlocks' => $pageRenderer->getPageBlocksData()[$language]
+        return JsonResponseFactory::create([
+            'dynamicBlocks' => $pageRenderer->getPageBlocksData()[$language] ?? null
         ]);
     }
 
@@ -306,19 +382,20 @@ class PageBuilder implements PageBuilderContract
      * Update the given page with the given data (an array of html blocks).
      *
      * @param PageContract $page
-     * @param $data
-     * @return bool|object|null
+     * @param array<string, mixed> $data
+     * @return bool
+     * @throws JsonException
      */
-    public function updatePage(PageContract $page, $data)
+    public function updatePage(PageContract $page, array $data): bool
     {
-        $pageRepository = new PageRepository;
+        $pageRepository = new PageRepository();
         return $pageRepository->updatePageData($page, $data);
     }
 
     /**
      * Set the list of all pages.
      *
-     * @param array $pages
+     * @param list<array{string, string}> $pages
      */
     public function setPages(array $pages): void
     {
@@ -328,7 +405,8 @@ class PageBuilder implements PageBuilderContract
     /**
      * Return the list of all pages, used in CKEditor link editor.
      *
-     * @return array
+     * @return list<array{string, string}>
+     * @throws ReflectionException
      */
     public function getPages(): array
     {
@@ -337,7 +415,7 @@ class PageBuilder implements PageBuilderContract
         }
 
         $pages = [];
-        $pageRepository = new PageRepository;
+        $pageRepository = new PageRepository();
         foreach ($pageRepository->getAll() as $page) {
             $pages[] = [
                 phpb_e($page->getName()),
@@ -352,14 +430,15 @@ class PageBuilder implements PageBuilderContract
      * Return this page's components in the format passed to GrapesJS.
      *
      * @param PageContract $page
-     * @return array
+     * @return array<int, mixed>
      */
     public function getPageComponents(PageContract $page): array
     {
         $data = $page->getBuilderData();
-        $components = $data['components'] ?? [0 => []];
+        $storedComponents = $data['components'] ?? [0 => []];
+        $components = is_array($storedComponents) ? array_values($storedComponents) : [0 => []];
         // backwards compatibility, components are now stored for each main container
-        if (isset($components[0]) && ! empty($components[0]) && ! isset($components[0][0])) {
+        if (isset($components[0]) && is_array($components[0]) && $components[0] !== [] && !isset($components[0][0])) {
             return [0 => $components];
         }
         return $components;
@@ -369,12 +448,12 @@ class PageBuilder implements PageBuilderContract
      * Return this page's style in the format passed to GrapesJS.
      *
      * @param PageContract $page
-     * @return array
+     * @return array<int|string, mixed>
      */
     public function getPageStyleComponents(PageContract $page): array
     {
         $data = $page->getBuilderData();
-        if (isset($data['style'])) {
+        if (is_array($data['style'] ?? null)) {
             return $data['style'];
         }
         return [];
@@ -389,7 +468,7 @@ class PageBuilder implements PageBuilderContract
     public function getPageStyleCss(PageContract $page): string
     {
         $data = $page->getBuilderData();
-        if (isset($data['css'])) {
+        if (is_string($data['css'] ?? null)) {
             return $data['css'];
         }
         return '';
@@ -403,7 +482,7 @@ class PageBuilder implements PageBuilderContract
      */
     public function customStyle(?string $css = null): ?string
     {
-        if (! is_null($css)) {
+        if ($css !== null) {
             $this->css = $css;
         }
         return $this->css;
@@ -412,15 +491,40 @@ class PageBuilder implements PageBuilderContract
     /**
      * Get or set custom scripts for customizing behaviour of the page builder.
      *
-     * @param string $location              head|body
+     * @param string $location head|body
      * @param string|null $scripts
-     * @return array|string
+     * @return string
      */
-    public function customScripts(string $location, ?string $scripts = null): array|string
+    public function customScripts(string $location, ?string $scripts = null): string
     {
-        if (! is_null($scripts)) {
+        if ($scripts !== null) {
             $this->scripts[$location] = $scripts;
         }
         return $this->scripts[$location] ?? '';
+    }
+
+    private function requireTheme(): ThemeContract
+    {
+        return $this->theme ?? throw new \LogicException('Page builder theme is not configured.');
+    }
+
+    /**
+     * @throws ReflectionException
+     */
+    private function pageRenderer(PageContract $page, bool $forPageBuilder = false): PageRenderer
+    {
+        $renderer = phpb_instance(PageRenderer::class, [$this->requireTheme(), $page, $forPageBuilder]);
+        return $renderer instanceof PageRenderer
+        ? $renderer :
+        new PageRenderer($this->requireTheme(), $page, $forPageBuilder);
+    }
+
+    /**
+     * @param array<mixed> $data
+     * @return array<string, mixed>
+     */
+    private function stringKeyedArray(array $data): array
+    {
+        return array_filter($data, 'is_string', ARRAY_FILTER_USE_KEY);
     }
 }

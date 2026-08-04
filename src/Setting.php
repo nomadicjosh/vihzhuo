@@ -1,35 +1,38 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo;
 
+use ReflectionException;
 use Vihzhuo\Contracts\SettingContract;
 use Vihzhuo\Repositories\SettingRepository;
 
+use function Qubus\Support\Helpers\is_null__;
+
 class Setting implements SettingContract
 {
-    protected static $settings;
+    /** @var array<string, string|list<string>>|null */
+    protected static ?array $settings = null;
 
     /**
      * Load all settings from database.
+     *
+     * @throws ReflectionException
      */
-    protected static function loadSettings()
+    protected static function loadSettings(): void
     {
         self::$settings = [];
-        $settingsRepository = new SettingRepository;
+        $settingsRepository = new SettingRepository();
         foreach ($settingsRepository->getAll() as $setting) {
-            self::$settings[$setting['setting']] = $setting['is_array'] ? explode(',', $setting['value']) : $setting['value'];
+            self::$settings[$setting->setting] = $setting->is_array ? explode(',', $setting->value) : $setting->value;
         }
     }
 
-    /**
-     * Return the value(s) of the given setting.
-     *
-     * @param string $key
-     * @return mixed|array|null
-     */
-    public static function get(string $key)
+    /** @return string|list<string>|null */
+    public static function get(string $key): string|array|null
     {
-        if (is_null(self::$settings)) {
+        if (is_null__(self::$settings)) {
             self::loadSettings();
         }
 
@@ -46,9 +49,9 @@ class Setting implements SettingContract
      * @param string $value
      * @return bool
      */
-    public static function has(string $key, string $value)
+    public static function has(string $key, string $value): bool
     {
-        if (is_null(self::$settings)) {
+        if (is_null__(self::$settings)) {
             self::loadSettings();
         }
 

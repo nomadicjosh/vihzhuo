@@ -1,9 +1,8 @@
 <script type="text/javascript">
 
-let linkType = editor.DomComponents.getType('link');
 editor.DomComponents.addType('link', {
-    model: linkType.model.extend({
-        defaults: Object.assign({}, linkType.model.prototype.defaults, {
+    model: {
+        defaults: {
             traits: [
                 {
                     type: 'text',
@@ -31,15 +30,8 @@ editor.DomComponents.addType('link', {
                     ],
                 }
             ],
-        }),
-        init() {
-            this.getTrait('content').setTargetValue(this.attributes.content.trim());
-            if (! this.attributes.attributes.target) {
-                this.getTrait('target').setTargetValue(false);
-            }
         },
-    }),
-    view: linkType.view
+    },
 });
 
 const textType = editor.DomComponents.getType('text');
@@ -50,12 +42,10 @@ editor.DomComponents.addType('text', {
             attributes: {},
         },
     },
-    view: textType.view.extend({
-        events: {
-            click: 'onActive',
-            touchend: 'onActive'
-        },
-    }),
+    // Retain GrapesJS's native text view. Its dblclick event enters edit mode;
+    // binding click/touchend to onActive makes ordinary selection show a caret
+    // and prevents the canvas selection command from updating the sidebar.
+    view: textType.view,
 });
 
 /**
@@ -107,10 +97,9 @@ editor.DomComponents.addType('default', {
     },
 });
 
-let imageType = editor.DomComponents.getType('image');
 editor.DomComponents.addType('image', {
-    model: imageType.model.extend({
-        defaults: Object.assign({}, imageType.model.prototype.defaults, {
+    model: {
+        defaults: {
             traits: [
                 {
                     type: 'text',
@@ -123,16 +112,7 @@ editor.DomComponents.addType('image', {
                     name: 'alt',
                 },
             ]
-        }),
-        init() {
-            if (this.attributes.attributes.title) {
-                this.getTrait('title').setTargetValue(this.attributes.attributes.title);
-            }
-            if (this.attributes.attributes.alt) {
-                this.getTrait('alt').setTargetValue(this.attributes.attributes.alt);
-            }
         },
-    }),
-    view: imageType.view
+    },
 });
 </script>

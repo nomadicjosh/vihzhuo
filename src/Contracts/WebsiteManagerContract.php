@@ -1,36 +1,47 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Contracts;
+
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
 
 interface WebsiteManagerContract
 {
     /**
      * Process the current GET or POST request and redirect or render the requested page.
      *
-     * @param $route
-     * @param $action
+     * @param ServerRequestInterface $request
+     * @param string|null $route
+     * @param string|null $action
+     * @return ResponseInterface
      */
-    public function handleRequest($route, $action);
+    public function handleRequest(
+        ServerRequestInterface $request,
+        ?string $route = null,
+        ?string $action = null
+    ): ResponseInterface;
 
     /**
      * Render the website manager overview page.
      */
-    public function renderOverview();
+    public function renderOverview(): ResponseInterface;
 
     /**
      * Render the website manager page settings (add/edit page form).
      *
      * @param ?PageContract $page
      */
-    public function renderPageSettings(?PageContract $page = null);
+    public function renderPageSettings(?PageContract $page = null): ResponseInterface;
 
     /**
      * Render the website manager menu settings (add/edit menu form).
      */
-    public function renderMenuSettings();
+    public function renderMenuSettings(): ResponseInterface;
 
     /**
      * Render the welcome page.
      */
-    public function renderWelcomePage();
+    public function renderWelcomePage(): ResponseInterface;
 }

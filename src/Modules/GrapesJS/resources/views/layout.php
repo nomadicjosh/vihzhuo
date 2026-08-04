@@ -5,7 +5,7 @@
     <title>Vihzhuo</title>
     <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9, user-scalable=no">
 
-    <link rel="stylesheet" href="<?= phpb_asset('pagebuilder/grapesjs-v0.15.9.min.css') ?>">
+    <link rel="stylesheet" href="<?= phpb_asset('pagebuilder/grapesjs-v0.23.4.min.css') ?>">
     <link rel="stylesheet" href="<?= phpb_asset('pagebuilder/bootstrap-v4.3.1.min.css') ?>">
     <link rel="stylesheet" href="<?= phpb_asset('pagebuilder/bootstrap-select-v1.13.12.min.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
@@ -14,7 +14,7 @@
     <link rel="icon" href="<?= phpb_asset('websitemanager/images/favicon-32x32.png') ?>">
     <?= $pageBuilder->customStyle(); ?>
 
-    <script src="<?= phpb_asset('pagebuilder/grapesjs-v0.15.9.min.js') ?>"></script>
+    <script src="<?= phpb_asset('pagebuilder/grapesjs-v0.23.4.min.js') ?>"></script>
     <script src="<?= phpb_asset('pagebuilder/underscore-v1.9.1.min.js') ?>"></script>
     <script src="<?= phpb_asset('pagebuilder/jquery-3.4.1.min.js') ?>"></script>
     <script src="<?= phpb_asset('pagebuilder/popper-v1.12.9.min.js') ?>"></script>

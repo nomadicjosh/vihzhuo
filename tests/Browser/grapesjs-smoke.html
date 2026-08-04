@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Vihzhuo GrapesJS smoke test</title>
+    <link rel="stylesheet" href="../../dist/pagebuilder/grapesjs-v0.23.4.min.css">
+    <link rel="stylesheet" href="../../dist/pagebuilder/app.css">
+    <style>
+        body { font-family: sans-serif; margin: 1rem; }
+        #result { padding: .75rem; background: #fff3cd; }
+        #gjs { height: 500px; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+<div id="result">Starting editor…</div>
+<div id="gjs"></div>
+<script src="../../dist/pagebuilder/grapesjs-v0.23.4.min.js"></script>
+<script>
+    const result = document.querySelector('#result');
+    try {
+        const editor = window.grapesjs.init({
+            container: '#gjs',
+            telemetry: false,
+            storageManager: false,
+            components: '<main><h1>Vihzhuo browser smoke test</h1><p>Editor content loaded.</p></main>',
+            canvasCss: 'body { height: auto; }',
+            canvas: {
+                styles: [new URL('../../dist/pagebuilder/page-injection.css', window.location.href).href],
+            },
+            avoidInlineStyle: true,
+            styleManager: {
+                sectors: [
+                    {id: 'position', name: 'Position', buildProps: ['width', 'padding']},
+                    {id: 'background', name: 'Background', buildProps: ['background-color', 'background']},
+                ]
+            },
+            plugins: [
+                {id: 'grapesjs-touch', plugin: window.VihzhuoGrapesJS.plugins.touch},
+                {id: 'vihzhuo-rte', plugin: window.VihzhuoGrapesJS.plugins.builtInRte},
+            ],
+            pluginsOpts: {
+                'vihzhuo-rte': {
+                    labels: {
+                        source: 'HTML source',
+                        sourceTitle: 'Edit HTML source',
+                        fontColor: 'Font color',
+                        fontSize: 'Font size',
+                        cancel: 'Cancel',
+                        apply: 'Apply',
+                    },
+                },
+            }
+        });
+        if (window.grapesjs.version !== '0.23.4' || !editor.BlockManager || !editor.StyleManager) {
+            throw new Error('Expected GrapesJS APIs were not initialized.');
+        }
+        window.VihzhuoGrapesJS.styleManager.installAdvancedSector(editor, 'Advanced');
+
+        editor.DomComponents.addType('link', {
+            model: {
+                defaults: {
+                    traits: [
+                        {type: 'text', name: 'content', changeProp: 1},
+                        {type: 'text', name: 'href'},
+                        {type: 'text', name: 'title'},
+                        {
+                            type: 'select',
+                            name: 'target',
+                            options: [
+                                {value: '_blank', name: 'Yes'},
+                                {value: false, name: 'No'},
+                            ],
+                        },
+                    ],
+                },
+            },
+        });
+
+        editor.DomComponents.addType('image', {
+            model: {
+                defaults: {
+                    traits: [
+                        {type: 'text', name: 'title'},
+                        {type: 'text', name: 'alt'},
+                    ],
+                },
+            },
+        });
+
+        const added = editor.addComponents(
+            '<section><a href="/docs" title="Documentation">Read docs</a>' +
+            '<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" title="Pixel" alt="Test image"></section>'
+        )[0];
+        const link = added.components().at(0);
+        const image = added.components().at(1);
+
+        if (!link.getTrait('content') || !link.getTrait('target')) {
+            const traitNames = link.get('traits').map((trait) => trait.get('name')).join(', ');
+            throw new Error(`Custom link traits were not initialized (type: ${link.get('type')}; traits: ${traitNames}).`);
+        }
+        if (!image.getTrait('title') || image.getTrait('alt').getValue() !== 'Test image') {
+            throw new Error('Custom image traits were not initialized from attributes.');
+        }
+
+        const styledText = editor.addComponents('<p id="rte-smoke-text" style="width: fit-content; margin: 0">Short</p>')[0];
+        const embeddedBlock = editor.addComponents(
+            '<div id="embedded-block"><iframe src="about:blank" title="Embedded content"></iframe></div>'
+        )[0];
+        setTimeout(async () => {
+            try {
+                const rteActions = editor.RichTextEditor.getAll().map(action => action.name);
+                if (!['link', 'fontColor', 'fontSize', 'source'].every(action => rteActions.includes(action))) {
+                    throw new Error(`Expected built-in RTE actions were not initialized (${rteActions.join(', ')}).`);
+                }
+                if (editor.RichTextEditor.customRte || window.CKEDITOR) {
+                    throw new Error('The legacy CKEditor runtime is still active.');
+                }
+                const sidebarPanels = window.VihzhuoGrapesJS.sidebarPanels;
+                const componentInteractions = window.VihzhuoGrapesJS.componentInteractions;
+                const styleManagerExtensions = window.VihzhuoGrapesJS.styleManager;
+                const liveSerializationParent = editor.addComponents({
+                    tagName: 'section',
+                    components: [{tagName: 'div', content: 'Keep me in the canvas'}],
+                })[0];
+                const liveSerializationBlock = liveSerializationParent.components().at(0);
+                const serializationContainer = liveSerializationParent.clone();
+                serializationContainer.components().reset();
+                serializationContainer.append(liveSerializationBlock.clone());
+                if (liveSerializationBlock.parent() !== liveSerializationParent ||
+                    liveSerializationParent.components().at(0) !== liveSerializationBlock) {
+                    throw new Error('Settings serialization detached the live block from the canvas.');
+                }
+                const settingsComponent = editor.addComponents({
+                    tagName: 'div',
+                    content: 'Settings component',
+                    traits: [{type: 'text', name: 'test-title', label: 'Test title'}],
+                })[0];
+                const emptySettingsComponent = editor.addComponents({
+                    tagName: 'div',
+                    content: 'Empty settings component',
+                    traits: [],
+                })[0];
+                const configuredBlock = editor.addComponents({
+                    tagName: 'div',
+                    content: 'Configured block',
+                })[0];
+                const addedTraits = configuredBlock.addTrait({
+                    type: 'text',
+                    name: 'youtube_embed_url',
+                    label: 'Youtube Embed URL',
+                });
+                const configuredTrait = addedTraits[0] || configuredBlock.getTrait('youtube_embed_url');
+                configuredTrait?.setValue('https://www.youtube.com/embed/test');
+                if (! Array.isArray(addedTraits) ||
+                    configuredBlock.getTrait('youtube_embed_url')?.getValue() !== 'https://www.youtube.com/embed/test') {
+                    throw new Error('Configured block traits were not added and initialized through the GrapesJS 0.23 API.');
+                }
+                configuredBlock.attributes['block-slug'] = 'configured-block';
+                const configuredChild = configuredBlock.append({
+                    tagName: 'span',
+                    content: 'Configured block child',
+                    traits: [],
+                })[0];
+                if (componentInteractions.findSettingsTarget(configuredChild) !== configuredBlock) {
+                    throw new Error('Settings did not resolve from an inner component to its configured block root.');
+                }
+                componentInteractions.selectSettingsOwner(editor, configuredChild);
+                if (editor.getSelected() !== configuredBlock) {
+                    throw new Error('Configured block root was not selected for the visible Settings view.');
+                }
+                sidebarPanels.activate(editor, 'open-settings-button', 'open-tm');
+                componentInteractions.synchronizeSettingsTarget(editor, configuredChild);
+                await new Promise(resolve => setTimeout(resolve, 20));
+                const configuredTraitLabels = [...document.querySelectorAll('.gjs-trt-trait .gjs-label')]
+                    .map(label => label.textContent.trim());
+                if (!configuredTraitLabels.includes('Youtube Embed URL')) {
+                    throw new Error('The visible Settings view did not rebuild for the configured block root.');
+                }
+                sidebarPanels.activate(editor, 'open-style-button', 'open-sm');
+                componentInteractions.synchronizeStyleTarget(editor, configuredBlock, true);
+                await new Promise(resolve => setTimeout(resolve, 20));
+                if (editor.StyleManager.getSelected() !== editor.StyleManager.getModelToStyle(configuredBlock) ||
+                    !document.querySelector('.gjs-sm-sectors .gjs-sm-sector')) {
+                    throw new Error('Style Manager did not populate after Settings was active on a configured block.');
+                }
+                sidebarPanels.activate(editor, 'open-settings-button', 'open-tm');
+                componentInteractions.synchronizeSettingsTarget(editor, configuredBlock);
+                await new Promise(resolve => setTimeout(resolve, 20));
+                if (![...document.querySelectorAll('.gjs-trt-trait .gjs-label')]
+                    .some(label => label.textContent.trim() === 'Youtube Embed URL')) {
+                    throw new Error('Configured Settings did not recover after switching back from Style Manager.');
+                }
+                editor.select();
+                configuredChild.set({selectable: false});
+                await new Promise(resolve => setTimeout(resolve, 20));
+                const configuredChildElement = configuredChild.getEl();
+                const resolvedSettingsOwner = componentInteractions.selectSettingsOwnerFromElement(editor, configuredChildElement);
+                if (editor.getSelected() !== configuredBlock) {
+                    throw new Error(`A non-selectable child click did not select its configured block owner ` +
+                        `(element: ${configuredChildElement?.outerHTML}; resolved: ${resolvedSettingsOwner?.cid}; ` +
+                        `selected: ${editor.getSelected()?.cid}).`);
+                }
+                const nextRender = () => new Promise(resolve => setTimeout(resolve, 20));
+                const embeddedFrame = embeddedBlock.components().at(0).getEl();
+                for (let attempt = 0; attempt < 50 &&
+                    editor.Canvas.getWindow().getComputedStyle(embeddedFrame).pointerEvents !== 'none'; attempt++) {
+                    await nextRender();
+                }
+                if (editor.Canvas.getWindow().getComputedStyle(embeddedFrame).pointerEvents !== 'none') {
+                    throw new Error(`Embedded content still captures block-selection pointer events (${embeddedFrame?.outerHTML}).`);
+                }
+
+                editor.select(emptySettingsComponent);
+                await nextRender();
+                sidebarPanels.activate(editor, 'open-settings-button', 'open-tm');
+                await nextRender();
+                sidebarPanels.renderEmptyTraitsMessage(editor, emptySettingsComponent, 'No settings');
+                let traitsRoot = document.querySelector('.gjs-traits-cs, .gjs-trt-traits');
+                if (!traitsRoot?.querySelector('[data-no-categories]') || !traitsRoot.querySelector('.no-settings')) {
+                    throw new Error('The empty Settings state did not preserve GrapesJS trait markup.');
+                }
+
+                for (let iteration = 0; iteration < 8; iteration++) {
+                    editor.select(settingsComponent);
+                    editor.select(emptySettingsComponent);
+                }
+                editor.select(settingsComponent);
+                await nextRender();
+                sidebarPanels.activate(editor, 'open-settings-button', 'open-tm');
+                await nextRender();
+                traitsRoot = document.querySelector('.gjs-traits-cs, .gjs-trt-traits');
+                if (!traitsRoot?.querySelector('.gjs-trt-trait') || traitsRoot.querySelector('.no-settings')) {
+                    throw new Error('Settings did not recover after rapid component selections.');
+                }
+
+                sidebarPanels.activate(editor, 'open-style-button', 'open-sm');
+                await nextRender();
+                if (!document.querySelector('.gjs-sm-sectors') || !editor.StyleManager.getSelected()) {
+                    throw new Error('Style Manager did not remain synchronized with the selection.');
+                }
+                editor.StyleManager.getSector('advanced').set('open', true);
+                await nextRender();
+                if (!styleManagerExtensions.mountSelectorManager(editor) ||
+                    !document.querySelector('.vihzhuo-selector-manager-host .gjs-clm-tags')) {
+                    throw new Error('The Advanced sector did not render the Selector Manager.');
+                }
+
+                const firstStyledBlock = editor.addComponents('<section>First styled block</section>')[0];
+                const secondStyledBlock = editor.addComponents('<h2>Second styled block</h2>')[0];
+                componentInteractions.enableEditable(firstStyledBlock);
+                componentInteractions.enableEditable(secondStyledBlock);
+                firstStyledBlock.addClass('IDSTYLEISOLATION0001');
+                secondStyledBlock.addClass('IDSTYLEISOLATION0002');
+                editor.select(firstStyledBlock);
+                await nextRender();
+                editor.StyleManager.addStyleTargets({'background-color': '#123456'});
+                editor.select(secondStyledBlock);
+                await nextRender();
+
+                const secondTarget = editor.StyleManager.getModelToStyle(secondStyledBlock);
+                const backgroundProperty = editor.StyleManager.getProperty('background', 'background-color');
+                const secondColorBefore = editor.Canvas.getWindow().getComputedStyle(secondStyledBlock.getEl()).backgroundColor;
+                if (editor.StyleManager.getSelected() !== secondTarget ||
+                    backgroundProperty.getValue() === '#123456' ||
+                    secondColorBefore === 'rgb(18, 52, 86)') {
+                    throw new Error('A newly selected block inherited the previous block\'s Style Manager value.');
+                }
+
+                editor.StyleManager.addStyleTargets({'background-color': '#abcdef'});
+                await nextRender();
+                const firstColor = editor.Canvas.getWindow().getComputedStyle(firstStyledBlock.getEl()).backgroundColor;
+                const secondColor = editor.Canvas.getWindow().getComputedStyle(secondStyledBlock.getEl()).backgroundColor;
+                if (firstColor !== 'rgb(18, 52, 86)' || secondColor !== 'rgb(171, 205, 239)') {
+                    throw new Error('Style Manager changes were not isolated to their selected blocks.');
+                }
+
+                const styledTextElement = styledText.getEl();
+                if (!styledTextElement) {
+                    throw new Error('The RTE test component was not rendered.');
+                }
+
+                componentInteractions.enableEditable(styledText);
+                styledText.addClass('IDSELECTIONSMOKE0001');
+                settingsComponent.set({stylable: true, selectable: true});
+                editor.select(settingsComponent);
+                styledTextElement.dispatchEvent(new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: editor.Canvas.getWindow(),
+                }));
+                await nextRender();
+                if (editor.getSelected() !== styledText || editor.getEditing()) {
+                    throw new Error('A single canvas click did not select editable text independently of the RTE.');
+                }
+                const selectionSpots = editor.Canvas.getSpots({type: 'select', component: styledText});
+                if (selectionSpots.length !== 1) {
+                    throw new Error('The selected canvas component did not retain its visual selection spot.');
+                }
+                const selectedTextStyle = editor.Canvas.getWindow().getComputedStyle(styledTextElement);
+                if (selectedTextStyle.outlineStyle !== 'none') {
+                    throw new Error(`The canvas component has a duplicate in-frame selection outline (${styledTextElement.className}; ${selectedTextStyle.outline}).`);
+                }
+
+                const canvasSelection = editor.Canvas.getDocument().getSelection();
+                const collapsedRange = editor.Canvas.getDocument().createRange();
+                collapsedRange.setStart(styledTextElement.firstChild, 0);
+                collapsedRange.collapse(true);
+                canvasSelection.removeAllRanges();
+                canvasSelection.addRange(collapsedRange);
+                styledTextElement.dispatchEvent(new MouseEvent('dblclick', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: editor.Canvas.getWindow(),
+                }));
+                await nextRender();
+                if (editor.getEditing() !== styledText) {
+                    throw new Error('A double-click did not activate the RTE for editable text.');
+                }
+
+                const activationRange = editor.Canvas.getDocument().createRange();
+                activationRange.selectNodeContents(styledTextElement);
+                canvasSelection.removeAllRanges();
+                canvasSelection.addRange(activationRange);
+                styledTextElement.dispatchEvent(new MouseEvent('mouseup', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: editor.Canvas.getWindow(),
+                }));
+                await nextRender();
+                if (editor.getEditing() !== styledText || canvasSelection.isCollapsed) {
+                    throw new Error('Text could not be highlighted after double-clicking into edit mode.');
+                }
+
+                const rteToolbar = editor.RichTextEditor.getToolbarEl();
+                const toolbarTop = Number.parseFloat(rteToolbar.style.top);
+                const toolbarBottom = toolbarTop + rteToolbar.offsetHeight;
+                if (toolbarBottom > 0 && toolbarTop < styledTextElement.offsetHeight) {
+                    throw new Error('The RTE toolbar overlaps the selected text.');
+                }
+                const toolbarRect = rteToolbar.getBoundingClientRect();
+                const canvasRect = document.querySelector('.gjs-cv-canvas').getBoundingClientRect();
+                if (toolbarRect.left < canvasRect.left || toolbarRect.right > canvasRect.right) {
+                    throw new Error('The RTE toolbar is clipped outside the visible canvas.');
+                }
+
+                styledText.trigger('disable');
+                await nextRender();
+
+                componentInteractions.synchronizeStyleTarget(editor, styledText);
+                editor.StyleManager.addStyleTargets({'padding-left': '13px'});
+                await nextRender();
+                const styledTextCss = editor.Canvas.getWindow().getComputedStyle(styledTextElement);
+                if (styledTextCss.paddingLeft !== '13px') {
+                    throw new Error('The Style Manager change was not applied to the canvas immediately.');
+                }
+
+                const helperBlock = editor.addComponents({
+                    tagName: 'section',
+                    selectable: true,
+                    stylable: true,
+                    components: [{
+                        tagName: 'div',
+                        selectable: true,
+                        stylable: false,
+                        editable: false,
+                        traits: [],
+                    }],
+                })[0];
+                const helperContainer = helperBlock.components().at(0);
+                if (componentInteractions.findSelectionTarget(helperContainer) !== helperBlock) {
+                    throw new Error('A non-stylable block helper did not resolve to its interactive block parent.');
+                }
+
+                const rte = editor.RichTextEditor.initRte(styledTextElement);
+                const selectText = () => {
+                    const range = rte.doc.createRange();
+                    range.selectNodeContents(styledTextElement);
+                    const selection = rte.selection();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                };
+
+                selectText();
+                const fontSizeAction = editor.RichTextEditor.get('fontSize');
+                fontSizeAction.btn.querySelector('select').value = '24px';
+                fontSizeAction.result(rte, fontSizeAction);
+                if (styledTextElement.querySelector('span')?.style.fontSize !== '24px') {
+                    throw new Error('The font-size RTE action did not apply its inline style.');
+                }
+
+                selectText();
+                const fontColorAction = editor.RichTextEditor.get('fontColor');
+                fontColorAction.btn.querySelector('input').value = '#ff0000';
+                fontColorAction.result(rte, fontColorAction);
+                const appliedColor = styledTextElement.querySelector('span')?.style.color || '';
+                if (!['rgb(255, 0, 0)', '#ff0000'].includes(appliedColor)) {
+                    throw new Error(`The font-color RTE action did not apply its inline style (${appliedColor}).`);
+                }
+
+                editor.select(styledText);
+                const sourceAction = editor.RichTextEditor.get('source');
+                sourceAction.result(rte, sourceAction);
+                const sourceEditor = document.querySelector('.vihzhuo-source-editor');
+                if (!editor.Modal.isOpen() || !sourceEditor) {
+                    throw new Error('The HTML-source RTE action did not open its editor.');
+                }
+                if (new URLSearchParams(window.location.search).has('source-preview')) {
+                    sourceEditor.querySelector('textarea').value = '<section class="hero">\n  <h1>Readable HTML source</h1>\n  <p>Edit your page markup with clear, high-contrast text.</p>\n</section>';
+                    result.textContent = `PASS: GrapesJS ${window.grapesjs.version}; HTML-source preview opened.`;
+                    result.style.background = '#d1e7dd';
+                    return;
+                }
+                sourceEditor.querySelector('textarea').value = '<strong>Source updated</strong>';
+                sourceEditor.querySelector('.btn-primary').click();
+                if (editor.Modal.isOpen() || !styledText.toHTML().includes('<strong>Source updated</strong>')) {
+                    throw new Error('The HTML-source RTE action did not update the selected component.');
+                }
+
+                result.textContent = `PASS: GrapesJS ${window.grapesjs.version}; selection, isolated live styling, Advanced controls, RTE, traits, and sidebar panels work.`;
+                result.style.background = '#d1e7dd';
+                if (new URLSearchParams(window.location.search).has('toolbar')) {
+                    editor.select(styledText);
+                    styledText.getView().onActive();
+                }
+            } catch (error) {
+                result.textContent = `FAIL: ${error instanceof Error ? error.message : String(error)}`;
+                result.style.background = '#f8d7da';
+            }
+        }, 0);
+    } catch (error) {
+        result.textContent = `FAIL: ${error instanceof Error ? error.message : String(error)}`;
+        result.style.background = '#f8d7da';
+    }
+</script>
+</body>
+</html>

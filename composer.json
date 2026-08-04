@@ -21,6 +21,7 @@
     ],
     "require": {
         "php": ">=8.4",
+        "qubus/http": "^4.2",
         "spatie/menu": "^3.2"
     },
     "autoload": {
@@ -31,7 +32,31 @@
             "src/Core/helpers.php"
         ]
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Vihzhuo\\Tests\\": "tests/"
+        }
+    },
     "require-dev": {
-        "symfony/var-dumper": "^8.0"
+        "qubus/qubus-coding-standard": "2.1.2",
+        "symfony/var-dumper": "^7.4"
+    },
+    "scripts": {
+        "analyse": "phpstan analyse --debug --no-progress --memory-limit=1G",
+        "test": "phpunit",
+        "check": [
+            "@analyse",
+            "@test"
+        ],
+        "cs-check": "phpcs",
+        "cs-fix": "phpcbf"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true,
+            "pestphp/pest-plugin": true
+        }
     }
 }

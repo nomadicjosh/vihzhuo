@@ -1,10 +1,17 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Modules\WebsiteManager;
 
 use Exception;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Qubus\Http\Factories\HtmlResponseFactory;
+use Qubus\Http\Factories\TextResponseFactory;
 use Vihzhuo\Contracts\PageContract;
 use Vihzhuo\Contracts\WebsiteManagerContract;
+use Vihzhuo\Core\View;
 use Vihzhuo\Repositories\PageRepository;
 use Vihzhuo\Repositories\SettingRepository;
 
@@ -13,101 +20,110 @@ class WebsiteManager implements WebsiteManagerContract
     /**
      * Process the current GET or POST request and redirect or render the requested page.
      *
-     * @param $route
-     * @param $action
+     * @param ServerRequestInterface $request
+     * @param string|null $route
+     * @param string|null $action
+     * @return ResponseInterface
      * @throws Exception
      */
-    public function handleRequest($route, $action): void
-    {
+    public function handleRequest(
+        ServerRequestInterface $request,
+        ?string $route = null,
+        ?string $action = null
+    ): ResponseInterface {
         if (is_null($route)) {
-            $this->renderOverview();
-            exit();
+            return $this->renderOverview();
         }
 
         if ($route === 'settings') {
             if ($action === 'renderBlockThumbs') {
-                $this->renderBlockThumbs();
-                exit();
+                return $this->renderBlockThumbs();
             }
             if ($action === 'update') {
-                $this->handleUpdateSettings();
-                exit();
+                return $this->handleUpdateSettings($request);
             }
         }
 
         if ($route === 'page_settings') {
             if ($action === 'create') {
-                $this->handleCreate();
-                exit();
+                return $this->handleCreate($request);
             }
 
-            $pageId = $_GET['page'] ?? null;
+            $pageId = $request->getQueryParams()['page'] ?? null;
             $pageRepository = new PageRepository;
-            $page = $pageRepository->findWithId($pageId);
+            $page = (is_int($pageId) || is_string($pageId)) ? $pageRepository->findWithId($pageId) : null;
             if (! ($page instanceof PageContract)) {
-                phpb_redirect(phpb_url('website_manager'));
+                return phpb_redirect(phpb_url('website_manager'));
             }
 
             if ($action === 'edit') {
-                $this->handleEdit($page);
-                exit();
+                return $this->handleEdit($request, $page);
             } elseif ($action === 'destroy') {
-                $this->handleDestroy($page);
+                return $this->handleDestroy($page);
             }
         }
+
+        return TextResponseFactory::create('Website manager page not found.', 404);
     }
 
     /**
      * Handle requests for creating a new page.
+     *
      * @throws Exception
      */
-    public function handleCreate(): void
+    public function handleCreate(ServerRequestInterface $request): ResponseInterface
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (strtoupper($request->getMethod()) === 'POST') {
+            $body = $request->getParsedBody();
             $pageRepository = new PageRepository;
-            $page = $pageRepository->create($_POST);
+            $page = $pageRepository->create(is_array($body) ? $this->stringKeyedArray($body) : []);
             if ($page) {
-                phpb_redirect(phpb_url('website_manager'), [
+                return phpb_redirect(phpb_url('website_manager'), [
                     'message-type' => 'success',
                     'message' => phpb_trans('website-manager.page-created')
                 ]);
             }
         }
 
-        $this->renderPageSettings();
+        return $this->renderPageSettings();
     }
 
     /**
      * Handle requests for editing the given page.
      *
+     * @param ServerRequestInterface $request
      * @param PageContract $page
+     * @return ResponseInterface
+     * @throws Exception
      */
-    public function handleEdit(PageContract $page): void
+    public function handleEdit(ServerRequestInterface $request, PageContract $page): ResponseInterface
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (strtoupper($request->getMethod()) === 'POST') {
+            $body = $request->getParsedBody();
             $pageRepository = new PageRepository;
-            $success = $pageRepository->update($page, $_POST);
+            $success = $pageRepository->update($page, is_array($body) ? $this->stringKeyedArray($body) : []);
             if ($success) {
-                phpb_redirect(phpb_url('website_manager'), [
+                return phpb_redirect(phpb_url('website_manager'), [
                     'message-type' => 'success',
                     'message' => phpb_trans('website-manager.page-updated')
                 ]);
             }
         }
 
-        $this->renderPageSettings($page);
+        return $this->renderPageSettings($page);
     }
 
     /**
      * Handle requests to destroy the given page.
      *
      * @param PageContract $page
+     * @return ResponseInterface
      */
-    public function handleDestroy(PageContract $page): void
+    public function handleDestroy(PageContract $page): ResponseInterface
     {
         $pageRepository = new PageRepository;
         $pageRepository->destroy($page->getId());
-        phpb_redirect(phpb_url('website_manager'), [
+        return phpb_redirect(phpb_url('website_manager'), [
             'message-type' => 'success',
             'message' => phpb_trans('website-manager.page-deleted')
         ]);
@@ -116,38 +132,46 @@ class WebsiteManager implements WebsiteManagerContract
     /**
      * Handle requests for updating the website settings.
      */
-    public function handleUpdateSettings(): void
+    public function handleUpdateSettings(ServerRequestInterface $request): ResponseInterface
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if (strtoupper($request->getMethod()) === 'POST') {
+            $body = $request->getParsedBody();
             $settingRepository = new SettingRepository;
-            $success = $settingRepository->updateSettings($_POST);
+            $success = $settingRepository->updateSettings(is_array($body) ? $this->stringKeyedArray($body) : []);
             if ($success) {
-                phpb_redirect(phpb_url('website_manager', ['tab' => 'settings']), [
+                return phpb_redirect(phpb_url('website_manager', ['tab' => 'settings']), [
                     'message-type' => 'success',
                     'message' => phpb_trans('website-manager.settings-updated')
                 ]);
             }
         }
+        return phpb_redirect(phpb_url('website_manager', ['tab' => 'settings']));
     }
 
     /**
      * Render the website manager overview page.
+     *
+     * @throws Exception
      */
-    public function renderOverview(): void
+    public function renderOverview(): ResponseInterface
     {
         $pageRepository = new PageRepository;
         $pages = $pageRepository->getAll();
 
-        $viewFile = 'overview';
-        require __DIR__ . '/resources/layouts/master.php';
+        return HtmlResponseFactory::create(View::render(
+            __DIR__ . '/resources/layouts/master.php',
+            ['viewFile' => 'overview', 'pages' => $pages]
+        ));
     }
 
     /**
      * Render the website manager page settings (add/edit page form).
      *
      * @param PageContract|null $page
+     * @return ResponseInterface
+     * @throws Exception
      */
-    public function renderPageSettings(?PageContract $page = null): void
+    public function renderPageSettings(?PageContract $page = null): ResponseInterface
     {
         $action = isset($page) ? 'edit' : 'create';
         $theme = phpb_instance('theme', [
@@ -155,34 +179,59 @@ class WebsiteManager implements WebsiteManagerContract
             phpb_config('theme.active_theme')
         ]);
 
-        $viewFile = 'page-settings';
-        require __DIR__ . '/resources/layouts/master.php';
+        return HtmlResponseFactory::create(View::render(__DIR__ . '/resources/layouts/master.php', [
+            'viewFile' => 'page-settings',
+            'action' => $action,
+            'theme' => $theme,
+            'page' => $page,
+        ]));
     }
 
     /**
      * Render the website manager menu settings (add/edit menu form).
+     *
+     * @throws Exception
      */
-    public function renderMenuSettings(): void
+    public function renderMenuSettings(): ResponseInterface
     {
-        $viewFile = 'menu-settings';
-        require __DIR__ . '/resources/layouts/master.php';
+        return HtmlResponseFactory::create(View::render(
+            __DIR__ . '/resources/layouts/master.php',
+            ['viewFile' => 'menu-settings']
+        ));
     }
 
     /**
      * Render a thumbnail for each theme block.
+     *
+     * @throws Exception
      */
-    public function renderBlockThumbs(): void
+    public function renderBlockThumbs(): ResponseInterface
     {
-        $viewFile = 'block-thumbs';
-        require __DIR__ . '/resources/layouts/master.php';
+        return HtmlResponseFactory::create(View::render(
+            __DIR__ . '/resources/layouts/master.php',
+            ['viewFile' => 'block-thumbs']
+        ));
     }
 
     /**
      * Render the website manager welcome page for installations without a homepage.
+     *
+     * @throws Exception
      */
-    public function renderWelcomePage(): void
+    public function renderWelcomePage(): ResponseInterface
     {
-        $viewFile = 'welcome';
-        require __DIR__ . '/resources/layouts/empty.php';
+        return HtmlResponseFactory::create(View::render(
+            __DIR__ . '/resources/layouts/empty.php',
+            ['viewFile' => 'welcome']
+        ));
+    }
+
+    /**
+     * @param array<mixed> $data
+     * @return array<string, mixed>
+     */
+    private function stringKeyedArray(array $data): array
+    {
+        return array_filter($data, 'is_string', ARRAY_FILTER_USE_KEY);
     }
 }

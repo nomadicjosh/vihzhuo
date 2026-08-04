@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo;
 
 use DirectoryIterator;
@@ -7,33 +9,23 @@ use Vihzhuo\Contracts\ThemeContract;
 
 class Theme implements ThemeContract
 {
-    /**
-     * @var array $config
-     */
+    /** @var array<string, mixed> */
     protected array $config;
 
-    /**
-     * @var string $themeSlug
-     */
     protected string $themeSlug;
 
-    /**
-     * @var array $blocks
-     */
-    protected array $blocks;
+    /** @var array<string, ThemeBlock> */
+    protected array $blocks = [];
 
-    /**
-     * @var array $layouts
-     */
-    protected array $layouts;
+    /** @var array<string, ThemeLayout> */
+    protected array $layouts = [];
 
     /**
      * Theme constructor.
      *
-     * @param array $config
+     * @param array<string, mixed> $config
      * @param string $themeSlug
      */
-
     public function __construct(array $config, string $themeSlug)
     {
         $this->config = $config;
@@ -43,17 +35,17 @@ class Theme implements ThemeContract
     /**
      * Load a single block entry
      */
-
-    protected function attemptBlockRegistration($entry): void
+    protected function attemptBlockRegistration(DirectoryIterator $entry): void
     {
         if ($entry->isDir() && ! $entry->isDot()) {
             $blockSlug = $entry->getFilename();
             $block = new ThemeBlock($this, $blockSlug);
 
             $isActive = true;
-            foreach (($block->get('whitelist') ?? []) as $whitelistDomain) {
+            $whitelist = $block->get('whitelist');
+            foreach (is_array($whitelist) ? $whitelist : [] as $whitelistDomain) {
                 $isActive = false;
-                if (str_contains(phpb_current_full_url(), $whitelistDomain)) {
+                if (is_string($whitelistDomain) && str_contains(phpb_current_full_url() ?? '', $whitelistDomain)) {
                     $isActive = true;
                     break;
                 }
@@ -68,16 +60,16 @@ class Theme implements ThemeContract
     /**
      * Load a single extension block entry
      */
-
-    protected function attemptExtensionBlockRegistration($slug, $path): void
+    protected function attemptExtensionBlockRegistration(string $slug, string $path): void
     {
         if ($slug && $path) {
             $block = new ThemeBlock($this, $path, true, $slug);
 
             $isActive = true;
-            foreach (($block->get('whitelist') ?? []) as $whitelistDomain) {
+            $whitelist = $block->get('whitelist');
+            foreach (is_array($whitelist) ? $whitelist : [] as $whitelistDomain) {
                 $isActive = false;
-                if (str_contains(phpb_current_full_url(), $whitelistDomain)) {
+                if (is_string($whitelistDomain) && str_contains(phpb_current_full_url() ?? '', $whitelistDomain)) {
                     $isActive = true;
                     break;
                 }
@@ -92,8 +84,7 @@ class Theme implements ThemeContract
     /**
      * Load a single layout entry
      */
-
-    protected function attemptLayoutRegistration($entry): void
+    protected function attemptLayoutRegistration(DirectoryIterator $entry): void
     {
         if ($entry->isDir() && ! $entry->isDot()) {
             $layoutSlug = $entry->getFilename();
@@ -105,8 +96,7 @@ class Theme implements ThemeContract
     /**
      * Load a single layout entry
      */
-
-    protected function attemptExtensionLayoutRegistration($slug, $path): void
+    protected function attemptExtensionLayoutRegistration(string $slug, string $path): void
     {
         $layout = new ThemeLayout($this, $path, true, $slug);
         $this->layouts[$slug] = $layout;
@@ -162,22 +152,14 @@ class Theme implements ThemeContract
         }
     }
 
-    /**
-     * Return all blocks of this theme.
-     *
-     * @return array        array of ThemeBlock instances
-     */
+    /** @return array<string, ThemeBlock> */
     public function getThemeBlocks(): array
     {
         $this->loadThemeBlocks();
         return $this->blocks;
     }
 
-    /**
-     * Return all layouts of this theme.
-     *
-     * @return array        array of ThemeLayout instances
-     */
+    /** @return array<string, ThemeLayout> */
     public function getThemeLayouts(): array
     {
         $this->loadThemeLayouts();
@@ -191,6 +173,7 @@ class Theme implements ThemeContract
      */
     public function getFolder(): string
     {
-        return $this->config['folder'] . '/' . basename($this->themeSlug);
+        $folder = $this->config['folder'] ?? '';
+        return (is_string($folder) ? $folder : '') . '/' . basename($this->themeSlug);
     }
 }

@@ -1,53 +1,47 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo;
 
+use Exception;
+use LogicException;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Qubus\Exception\Data\TypeException;
+use Qubus\Http\Factories\HtmlResponseFactory;
+use Qubus\Http\Factories\Psr17Factory;
+use Qubus\Http\Factories\RedirectResponseFactory;
+use Qubus\Http\Factories\TextResponseFactory;
+use Qubus\Http\Response;
 use Vihzhuo\Contracts\AuthContract;
+use Vihzhuo\Contracts\CacheContract;
+use Vihzhuo\Contracts\PageBuilderContract;
 use Vihzhuo\Contracts\PageContract;
 use Vihzhuo\Contracts\PageTranslationContract;
-use Vihzhuo\Contracts\WebsiteManagerContract;
-use Vihzhuo\Contracts\PageBuilderContract;
 use Vihzhuo\Contracts\RouterContract;
 use Vihzhuo\Contracts\ThemeContract;
+use Vihzhuo\Contracts\WebsiteManagerContract;
+use Vihzhuo\Core\DB;
+use Vihzhuo\Core\HttpContext;
 use Vihzhuo\Modules\GrapesJS\PageRenderer;
 use Vihzhuo\Repositories\UploadRepository;
-use Vihzhuo\Core\DB;
 
 class Vihzhuo
 {
-    /**
-     * @var ?AuthContract $auth
-     */
-    protected ?AuthContract $auth = null;
+    private ?AuthContract $auth = null;
 
-    /**
-     * @var ?WebsiteManagerContract $websiteManager
-     */
-    protected ?WebsiteManagerContract $websiteManager = null;
+    private ?WebsiteManagerContract $websiteManager = null;
 
-    /**
-     * @var ?PageBuilderContract $pageBuilder
-     */
-    protected ?PageBuilderContract $pageBuilder = null;
+    private ?PageBuilderContract $pageBuilder = null;
 
-    /**
-     * @var ?RouterContract $router
-     */
-    protected ?RouterContract $router = null;
+    private ?RouterContract $router = null;
 
-    /**
-     * @var ?ThemeContract $theme
-     */
-    protected ?ThemeContract $theme;
+    private ?ThemeContract $theme = null;
 
-    /**
-     * Vihzhuo constructor.
-     *
-     * @param array|null $config         configuration in the format defined in config/config.example.php
-     */
+    /** @param array<string, mixed>|null $config */
     public function __construct(?array $config = [])
     {
-        // do nothing if no config is provided (e.g. during composer install)
         if (empty($config)) {
             return;
         }
@@ -55,478 +49,403 @@ class Vihzhuo
         if (session_status() === PHP_SESSION_NONE) {
             session_start();
         }
-
-        // if flash session data is set, set global session flash data and remove data
-        if (isset($_SESSION['phpb_flash'])) {
+        if (isset($_SESSION['phpb_flash']) && is_array($_SESSION['phpb_flash'])) {
             global $phpb_flash;
             $phpb_flash = $_SESSION['phpb_flash'];
             unset($_SESSION['phpb_flash']);
         }
 
         $this->setConfig($config);
-
-        // create database connection, if enabled
-        if (phpb_config('storage.use_database')) {
-            $this->setDatabaseConnection(phpb_config('storage.database'));
+        if ($this->configBool('storage.use_database')) {
+            $this->setDatabaseConnection($this->configArray('storage.database'));
+        }
+        if ($this->configBool('auth.use_login')) {
+            $auth = phpb_instance('auth');
+            $this->auth = $auth instanceof AuthContract ? $auth : null;
+        }
+        if ($this->configBool('website_manager.use_website_manager')) {
+            $manager = phpb_instance('website_manager');
+            $this->websiteManager = $manager instanceof WebsiteManagerContract ? $manager : null;
         }
 
-        // init the default authentication, if enabled
-        if (phpb_config('auth.use_login')) {
-            $this->auth = phpb_instance('auth');
-        }
+        $pageBuilder = phpb_instance('pagebuilder');
+        $theme = phpb_instance('theme', [$this->configArray('theme'), $this->configString('theme.active_theme')]);
+        $router = phpb_instance('router');
+        $this->pageBuilder = $pageBuilder instanceof PageBuilderContract ? $pageBuilder : null;
+        $this->theme = $theme instanceof ThemeContract ? $theme : null;
+        $this->router = $router instanceof RouterContract ? $router : null;
 
-        // init the default website manager, if enabled
-        if (phpb_config('website_manager.use_website_manager')) {
-            $this->websiteManager = phpb_instance('website_manager');
-        }
-
-        // init the default page builder, active theme and page router
-        $this->pageBuilder = phpb_instance('pagebuilder');
-
-        $this->theme = phpb_instance('theme', [
-            phpb_config('theme'), 
-            phpb_config('theme.active_theme')
-        ]);
-
-        $this->router = phpb_instance('router');
-
-        // load translations in the language that is currently active
-        $this->loadTranslations(phpb_current_language());
+        $this->loadTranslations($this->configString('general.language', 'en'));
     }
 
-    /**
-     * Load translations of the given language into a global variable.
-     *
-     * @param $language
-     * @return array
-     */
-    public function loadTranslations($language): array
+    /** @return array<string, mixed> */
+    public function loadTranslations(string $language): array
     {
         global $phpb_translations;
-
-        $phpbLanguageFile = __DIR__ . '/../lang/' . $language . '.php';
-        if (! file_exists($phpbLanguageFile)) {
-            $phpbLanguageFile = __DIR__ . '/../lang/en.php';
+        $language = preg_replace('/[^a-zA-Z_-]/', '', $language) ?: 'en';
+        $languageFile = __DIR__ . '/../lang/' . $language . '.php';
+        if (!is_file($languageFile)) {
+            $languageFile = __DIR__ . '/../lang/en.php';
         }
-        $phpb_translations = require $phpbLanguageFile;
+        $translations = require $languageFile;
+        $phpb_translations = is_array($translations) ? $this->stringKeyedArray($translations) : [];
 
-        // load default and current language translations of the current theme
-        $themeTranslationsFolder = phpb_config('theme.folder') . '/' . phpb_config('theme.active_theme') . '/translations';
-        if (file_exists($themeTranslationsFolder . '/en.php')) {
-            $phpb_translations = array_merge($phpb_translations, require $themeTranslationsFolder . '/en.php');
-        }
-        if (file_exists($themeTranslationsFolder . '/' . $language . '.php')) {
-            $phpb_translations = array_merge($phpb_translations, require $themeTranslationsFolder . '/' . $language . '.php');
+        $themeFolder = $this->configString('theme.folder') . '/' . $this->configString('theme.active_theme') . '/translations';
+        foreach (array_unique(['en', $language]) as $locale) {
+            $file = $themeFolder . '/' . $locale . '.php';
+            if (is_file($file)) {
+                $themeTranslations = require $file;
+                if (is_array($themeTranslations)) {
+                    $phpb_translations = array_merge($phpb_translations, $this->stringKeyedArray($themeTranslations));
+                }
+            }
         }
 
-        $phpb_translations = phpb_instance(Translator::class)->customize($phpb_translations);
-        return $phpb_translations;
+        $translator = phpb_instance(Translator::class);
+        if ($translator instanceof Translator) {
+            $phpb_translations = $translator->customize($phpb_translations);
+        }
+        return $this->stringKeyedArray($phpb_translations);
     }
 
-
-    /**
-     * Set the Vihzhuo configuration to the given array.
-     *
-     * @param array $config
-     */
+    /** @param array<string, mixed> $config */
     public function setConfig(array $config): void
     {
         global $phpb_config;
         $phpb_config = $config;
     }
 
-    /**
-     * Set the Vihzhuo database connection using the given array.
-     *
-     * @param array $config
-     */
+    /** @param array<string, mixed> $config */
     public function setDatabaseConnection(array $config): void
     {
         global $phpb_db;
         $phpb_db = new DB($config);
     }
 
-    /**
-     * Set a custom auth.
-     *
-     * @param AuthContract $auth
-     */
     public function setAuth(AuthContract $auth): void
     {
         $this->auth = $auth;
     }
 
-    /**
-     * Set a custom website manager.
-     *
-     * @param WebsiteManagerContract $websiteManager
-     */
     public function setWebsiteManager(WebsiteManagerContract $websiteManager): void
     {
         $this->websiteManager = $websiteManager;
     }
 
-    /**
-     * Set a custom PageBuilder.
-     *
-     * @param PageBuilderContract $pageBuilder
-     */
     public function setPageBuilder(PageBuilderContract $pageBuilder): void
     {
         $this->pageBuilder = $pageBuilder;
     }
 
-    /**
-     * Set a custom router.
-     *
-     * @param RouterContract $router
-     */
     public function setRouter(RouterContract $router): void
     {
         $this->router = $router;
     }
 
-    /**
-     * Set a custom theme.
-     *
-     * @param ThemeContract $theme
-     */
     public function setTheme(ThemeContract $theme): void
     {
         $this->theme = $theme;
         $this->pageBuilder?->setTheme($theme);
     }
 
-
-    /**
-     * Return the Auth instance of this Vihzhuo.
-     *
-     * @return AuthContract|null
-     */
     public function getAuth(): ?AuthContract
     {
         return $this->auth;
     }
 
-    /**
-     * Return the WebsiteManager instance of this Vihzhuo.
-     *
-     * @return WebsiteManagerContract|null
-     */
     public function getWebsiteManager(): ?WebsiteManagerContract
     {
         return $this->websiteManager;
     }
 
-    /**
-     * Return the PageBuilder instance of this Vihzhuo.
-     *
-     * @return PageBuilderContract|null
-     */
     public function getPageBuilder(): ?PageBuilderContract
     {
         return $this->pageBuilder;
     }
 
-    /**
-     * Return the Router instance of this Vihzhuo.
-     *
-     * @return RouterContract|null
-     */
     public function getRouter(): ?RouterContract
     {
         return $this->router;
     }
 
-    /**
-     * Return the Theme instance of this Vihzhuo.
-     *
-     * @return ThemeContract|null
-     */
     public function getTheme(): ?ThemeContract
     {
         return $this->theme;
     }
 
-
     /**
-     * Process the current GET or POST request and redirect or render the requested page.
-     *
-     * @param string|null $action
-     * @return bool
+     * @throws Exception
      */
-    public function handleRequest(?string $action = null): bool
+    public function handleRequest(ServerRequestInterface $request): ResponseInterface
     {
-        $route = $route ?? $_GET['route'] ?? null;
-        $action = $action ?? $_GET['action'] ?? null;
+        HttpContext::setRequest($request);
+        $route = $this->queryString($request, 'route');
+        $action = $this->queryString($request, 'action');
 
-        if (! phpb_config('auth.use_login') || ! phpb_config('website_manager.use_website_manager')) {
-            die('The Vihzhuo Authentication module is disabled, but no alternative has been implemented (you are still calling the standard handleRequest() method).<br>'
-                . 'Implement a piece of code that checks whether the user is logged in. If logged in, call handleAuthenticatedRequest() or else call handlePublicRequest().');
+        if (!$this->configBool('auth.use_login') || !$this->configBool('website_manager.use_website_manager')) {
+            return TextResponseFactory::create(
+                'The default request handler requires both authentication and the website manager. '
+                . 'Use handleAuthenticatedRequest() or handlePublicRequest() for a custom integration.',
+                500
+            );
         }
 
-        // handle login and logout requests
-        $this->auth->handleRequest($action);
+        $auth = $this->requireAuthService();
+        $authResponse = $auth->handleRequest($request, $action);
+        if ($authResponse !== null) {
+            return $authResponse;
+        }
 
-        // handle website manager requests
         if (phpb_in_module('website_manager')) {
-            $this->auth->requireAuth();
-            $this->websiteManager->handleRequest($route, $action);
-            header("HTTP/1.1 404 Not Found");
-            die('Vihzhuo WebsiteManager page not found');
+            $loginResponse = $auth->requireAuth();
+            return $loginResponse ?? $this->requireWebsiteManager()->handleRequest($request, $route, $action);
         }
-
-        // handle page builder requests
         if (phpb_in_module('pagebuilder')) {
-            $this->auth->requireAuth();
+            $loginResponse = $auth->requireAuth();
+            if ($loginResponse !== null) {
+                return $loginResponse;
+            }
             phpb_set_in_editmode();
-            $this->pageBuilder->handleRequest($route, $action);
-            header("HTTP/1.1 404 Not Found");
-            die('Vihzhuo PageBuilder page not found');
+            return $this->requirePageBuilder()->handleRequest($request, $route, $action)
+            ?? TextResponseFactory::create('Page builder page not found.', 404);
         }
 
-        // handle all requests that do not need authentication
-        if ($this->handlePublicRequest() !== null) {
-            return true;
+        $publicResponse = $this->handlePublicRequest($request);
+        if ($publicResponse !== null) {
+            return $publicResponse;
         }
-
         if (phpb_current_relative_url() === '/') {
-            $this->websiteManager->renderWelcomePage();
-            return true;
+            return $this->requireWebsiteManager()->renderWelcomePage();
         }
-
-        header("HTTP/1.1 404 Not Found");
-        die('Vihzhuo page not found. Check your URL: <b>' . phpb_e(phpb_full_url(phpb_current_relative_url())) . '</b>');
+        return HtmlResponseFactory::create(
+            'Vihzhuo page not found. Check your URL: <b>' . phpb_e(phpb_full_url(phpb_current_relative_url())) . '</b>',
+            404
+        );
     }
 
     /**
-     * Handle public requests, allowed without any authentication.
-     *
-     * @return string|null
+     * @throws Exception
      */
-    public function handlePublicRequest(): string|null
+    public function handlePublicRequest(ServerRequestInterface $request): ?ResponseInterface
     {
-        // if we are on the URL of an upload, return uploaded file
-        // (note: this is a fallback option used if .htaccess does not whitelist direct access to the /uploads folder.
-        // allowing direct /uploads access via .htaccess is preferred since it gives faster loading time)
-        if (str_starts_with(phpb_current_relative_url(), phpb_config('general.uploads_url') . '/')) {
-            $this->handleUploadedFileRequest();
-            header("HTTP/1.1 404 Not Found");
-            exit();
+        HttpContext::setRequest($request);
+        $relativeUrl = phpb_current_relative_url();
+        $uploadsUrl = $this->configString('general.uploads_url');
+        if ($uploadsUrl !== '' && str_starts_with($relativeUrl, $uploadsUrl . '/')) {
+            return $this->handleUploadedFileRequest();
         }
-        // if we are on the URL of a Vihzhuo asset, return the asset
-        if (str_starts_with(phpb_current_relative_url(), phpb_config('general.assets_url') . '/')) {
-            $this->handlePageBuilderAssetRequest();
-            header("HTTP/1.1 404 Not Found");
-            exit();
+        $assetsUrl = $this->configString('general.assets_url');
+        if ($assetsUrl !== '' && str_starts_with($relativeUrl, $assetsUrl . '/')) {
+            return $this->handlePageBuilderAssetRequest();
         }
 
-        // try to find page in cache
-        $cache = phpb_instance('cache');
-        if (phpb_config('cache.enabled') &&
-            ! isset($_GET['ignore_cache']) &&
-            ! isset($_GET['refresh_cache']) &&
-            ! isset($_COOKIE['ignore_cache']) &&
-            PageRenderer::canBeCached()
+        $query = $request->getQueryParams();
+        if (
+            $this->configBool('cache.enabled') && !isset($query['ignore_cache']) && !isset($query['refresh_cache'])
+            && !isset($request->getCookieParams()['ignore_cache']) && PageRenderer::canBeCached()
         ) {
-            $cachedContent = $cache->getForUrl(phpb_current_relative_url());
-            if ($cachedContent) {
-                return $cachedContent;
+            $cached = $this->requireCache()->getForUrl($relativeUrl);
+            if ($cached !== null) {
+                return HtmlResponseFactory::create($cached);
             }
         }
 
-        // let the page router resolve the current URL
-        $page = null;
-        $pageTranslation = $this->resolvePageLanguageVariantFromUrl(phpb_current_relative_url());
-        if ($pageTranslation !== null) {
-            $page = $pageTranslation->getPage();
+        $translation = $this->resolvePageLanguageVariantFromUrl($relativeUrl);
+        if (
+            $translation === null && $relativeUrl !== strtolower($relativeUrl)
+            && $this->resolvePageLanguageVariantFromUrl(strtolower($relativeUrl)) !== null
+        ) {
+            return RedirectResponseFactory::create(strtolower($relativeUrl), 301);
         }
-        // if the URL cannot be resolved, but the lowercase version of the URL can be resolved, redirect to the lowercase URL
-        if (($page->logic ?? '') === 'page-not-found' && phpb_current_relative_url() !== strtolower(phpb_current_relative_url())) {
-            $pageLowerCaseUrlTranslation = $this->resolvePageLanguageVariantFromUrl(strtolower(phpb_current_relative_url()));
-            if ($pageLowerCaseUrlTranslation !== null) {
-                $pageLowerCaseUrl = $pageLowerCaseUrlTranslation->getPage();
-                if (($pageLowerCaseUrl->logic ?? '') !== 'page-not-found') {
-                    header("HTTP/1.1 301 Moved Permanently");
-                    header("Location: " . strtolower(phpb_current_relative_url()));
-                    exit();
-                }
-            }
+
+        if ($translation === null) {
+            return null;
         }
-        // render page if resolved
-        if ($page !== null) {
-            $renderedContent = $this->pageBuilder->renderPage($page, $pageTranslation->locale);
-            if (!str_contains($pageTranslation->route, '/*')) {
-                $this->cacheRenderedPage($renderedContent);
-            }
-            return $renderedContent;
+        $page = $translation->getPage();
+        if (!$page instanceof PageContract) {
+            return null;
+        }
+        $rendered = $this->requirePageBuilder()->renderPage($page, $translation->getLocale());
+        if (!str_contains($translation->getRoute(), '/*')) {
+            $this->cacheRenderedPage($rendered, $translation->getLocale());
+        }
+        return HtmlResponseFactory::create($rendered);
+    }
+
+    /**
+     * Resolve the language-specific page route,
+     * with an override point for host applications.
+     */
+    protected function resolvePageLanguageVariantFromUrl(string $url): ?PageTranslationContract
+    {
+        return $this->requireRouter()->resolve($url);
+    }
+
+    public function cacheRenderedPage(string $renderedContent, ?string $language = null): void
+    {
+        $query = HttpContext::request()->getQueryParams();
+        if (!$this->configBool('cache.enabled') || !PageRenderer::canBeCached() || isset($query['ignore_cache'])) {
+            return;
+        }
+        $cache = $this->requireCache();
+        $url = str_replace(
+            ['?refresh_cache&', '?refresh_cache', '&refresh_cache'],
+            ['?', '', ''],
+            phpb_current_relative_url()
+        );
+        if ($language !== null && !str_starts_with($url, '/' . $language . '/')) {
+            $cache->invalidate($url);
+            $url = '/' . $language . $url;
+        }
+        if (PageRenderer::$skeletonCacheUrl !== '') {
+            $url = PageRenderer::$skeletonCacheUrl;
+        }
+        $cache->storeForUrl($url, $renderedContent, PageRenderer::getCacheLifetime());
+    }
+
+    public function handleAuthenticatedRequest(
+        ServerRequestInterface $request,
+        ?string $route = null,
+        ?string $action = null
+    ): ?ResponseInterface {
+        HttpContext::setRequest($request);
+        $route ??= $this->queryString($request, 'route');
+        $action ??= $this->queryString($request, 'action');
+        if ($this->configBool('website_manager.use_website_manager') && phpb_in_module('website_manager')) {
+            return $this->requireWebsiteManager()->handleRequest($request, $route, $action);
+        }
+        if (phpb_in_module('pagebuilder')) {
+            phpb_set_in_editmode();
+            return $this->requirePageBuilder()->handleRequest($request, $route, $action);
         }
         return null;
     }
 
     /**
-     * Resolve a PageTranslation from the given URL.
-     *
-     * @param $url
-     * @return PageTranslationContract|null
+     * @throws Exception
      */
-    protected function resolvePageLanguageVariantFromUrl($url): ?PageTranslationContract
+    public function handleUploadedFileRequest(): ResponseInterface
     {
-        return $this->router->resolve($url);
-    }
-
-    /**
-     * Cache the rendered page contents, if caching is enabled and the current page does not contain non-cacheable blocks.
-     *
-     * @param string $renderedContent
-     * @param $language
-     * @return void
-     */
-    public function cacheRenderedPage(string $renderedContent, $language = null): void
-    {
-        if (! phpb_config('cache.enabled') || ! PageRenderer::canBeCached() || isset($_GET['ignore_cache'])) {
-            return;
-        }
-        $cache = phpb_instance('cache');
-
-        // allow a forced cached page refresh, stored for the current URL but without the refresh parameter
-        $url = phpb_current_relative_url();
-        $url = str_replace('?refresh_cache&', '?', $url);
-        $url = str_replace('?refresh_cache', '', $url);
-        $url = str_replace('&refresh_cache', '', $url);
-        if ($language && !str_starts_with($url, '/' . $language . '/')) {
-            $cache->invalidate($url);
-            $url = '/' . $language . $url;
-        }
-
-        if (! empty(PageRenderer::$skeletonCacheUrl)) {
-            $url = PageRenderer::$skeletonCacheUrl;
-        }
-        $cache->storeForUrl($url, $renderedContent, phpb_static(PageRenderer::class)::getCacheLifetime());
-    }
-
-    /**
-     * Handle authenticated requests, this method assumes you have checked that the user is currently logged in.
-     *
-     * @param string|null $route
-     * @param string|null $action
-     */
-    public function handleAuthenticatedRequest(?string $route = null, ?string $action = null): void
-    {
-        $route = $route ?? $_GET['route'] ?? null;
-        $action = $action ?? $_GET['action'] ?? null;
-
-        // handle website manager requests
-        if (phpb_config('website_manager.use_website_manager') && phpb_in_module('website_manager')) {
-            $this->websiteManager->handleRequest($route, $action);
-            header("HTTP/1.1 404 Not Found");
-            exit();
-        }
-
-        // handle page builder requests
-        if (phpb_in_module('pagebuilder')) {
-            phpb_set_in_editmode();
-            $this->pageBuilder->handleRequest($route, $action);
-            header("HTTP/1.1 404 Not Found");
-            exit();
-        }
-    }
-
-    /**
-     * Handle uploaded file requests.
-     */
-    public function handleUploadedFileRequest(): void
-    {
-        // get the requested file by stripping the configured uploads_url prefix from the current request URI
-        $file = substr(phpb_current_relative_url(), strlen(phpb_config('general.uploads_url')) + 1);
-        // $file is in the format {file id}/{file name}.{file extension}, so get file id as the part before /
+        $prefix = $this->configString('general.uploads_url');
+        $file = substr(phpb_current_relative_url(), strlen($prefix) + 1);
         $fileId = explode('/', $file)[0];
-        if (empty($fileId)) {
-            header("HTTP/1.1 404 Not Found");
-            exit();
+        $record = new UploadRepository()->findWhere('public_id', $fileId)[0] ?? null;
+        if (!$record instanceof UploadedFile) {
+            return TextResponseFactory::create('File not found.', 404);
         }
-
-        $uploadRepository = new UploadRepository;
-        $uploadedFile = $uploadRepository->findWhere('public_id', $fileId);
-        if (empty($uploadedFile)) {
-            header("HTTP/1.1 404 Not Found");
-            exit();
+        $uploadsFolder = $this->configString('storage.uploads_folder');
+        $serverFile = realpath($uploadsFolder . '/' . $record->server_file);
+        $root = realpath($uploadsFolder);
+        if ($serverFile === false || $root === false || !str_starts_with($serverFile, $root . DIRECTORY_SEPARATOR)) {
+            return TextResponseFactory::create('File not found.', 404);
         }
-
-        $uploadedFile = $uploadedFile[0];
-        $serverFile = realpath(phpb_config('storage.uploads_folder') . '/' . $uploadedFile->server_file);
-        // add backwards compatibility for files uploaded with Vihzhuo <= v0.12.0, stored as /uploads/{id}.{extension}
-        if (! $serverFile) $serverFile = realpath(phpb_config('storage.uploads_folder') . '/' . basename($uploadedFile->server_file));
-        if (! $serverFile) {
-            header("HTTP/1.1 404 Not Found");
-            exit();
-        }
-
-        header('Content-Type: ' . $uploadedFile->mime_type);
-        header('Content-Disposition: inline; filename="' . basename($uploadedFile->original_file) . '"');
-        header('Expires: 0');
-        header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
-        header('Content-Length: ' . filesize($serverFile));
-
-        readfile($serverFile);
-        exit();
+        return $this->fileResponse($serverFile, $record->mime_type, $record->original_file);
     }
 
     /**
-     * Handle page builder asset requests.
+     * @throws Exception
      */
-    public function handlePageBuilderAssetRequest(): void
+    public function handlePageBuilderAssetRequest(): ResponseInterface
     {
-        // get asset file path by stripping the configured assets_url prefix from the current request URI
-        $asset = substr(phpb_current_relative_url(), strlen(phpb_config('general.assets_url')) + 1);
-        $asset = explode('?', $asset)[0];
-
-        $distPath = realpath(__DIR__ . '/../dist/');
-        $requestedFile = realpath($distPath . '/' . $asset);
-        if (! $requestedFile) {
-            header("HTTP/1.1 404 Not Found");
-            exit();
+        $prefix = $this->configString('general.assets_url');
+        $asset = explode('?', substr(phpb_current_relative_url(), strlen($prefix) + 1), 2)[0];
+        $distPath = realpath(__DIR__ . '/../dist');
+        $requestedFile = $distPath !== false ? realpath($distPath . '/' . $asset) : false;
+        if (
+            $distPath === false || $requestedFile === false
+            || !str_starts_with($requestedFile, $distPath . DIRECTORY_SEPARATOR)
+        ) {
+            return TextResponseFactory::create('Asset not found.', 404);
         }
-
-        // prevent path traversal by ensuring the requested file is inside the dist folder
-        if (!str_starts_with($requestedFile, $distPath)) {
-            header("HTTP/1.1 404 Not Found");
-            exit();
-        }
-
-        // only allow specific extensions
-        $ext = pathinfo($requestedFile, PATHINFO_EXTENSION);
-        if (! in_array($ext, ['js', 'css', 'jpg', 'png', 'svg'])) {
-            header("HTTP/1.1 404 Not Found");
-            exit();
-        }
-
         $contentTypes = [
-            'js' => 'application/javascript; charset=utf-8',
-            'css' => 'text/css; charset=utf-8',
-            'png' => 'image/png',
-            'jpg' => 'image/jpeg',
-            'svg' => 'image/svg+xml'
+            'js' => 'application/javascript; charset=utf-8', 'css' => 'text/css; charset=utf-8',
+            'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif',
+            'webp' => 'image/webp', 'svg' => 'image/svg+xml', 'woff' => 'font/woff',
+            'woff2' => 'font/woff2', 'ttf' => 'font/ttf', 'eot' => 'application/vnd.ms-fontobject',
         ];
-        header('Content-Type: ' . $contentTypes[$ext]);
-        header('Content-Disposition: inline; filename="' . basename($requestedFile) . '"');
-        header('Expires: 0');
-        header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
-        header('Content-Length: ' . filesize($requestedFile));
-
-        readfile($requestedFile);
-        exit();
+        $extension = strtolower(pathinfo($requestedFile, PATHINFO_EXTENSION));
+        if (!isset($contentTypes[$extension])) {
+            return TextResponseFactory::create('Asset type not allowed.', 404);
+        }
+        return $this->fileResponse($requestedFile, $contentTypes[$extension], basename($requestedFile));
     }
 
-
-    /**
-     * Render the PageBuilder.
-     *
-     * @param PageContract $page
-     */
-    public function renderPageBuilder(PageContract $page): void
+    public function renderPageBuilder(PageContract $page): ResponseInterface
     {
         phpb_set_in_editmode();
-        $this->pageBuilder->renderPageBuilder($page);
+        return $this->requirePageBuilder()->renderPageBuilder($page);
+    }
+
+    /**
+     * @throws TypeException
+     */
+    private function fileResponse(string $path, string $contentType, string $filename): ResponseInterface
+    {
+        $stream = new Psr17Factory()->createStreamFromFile($path);
+        return new Response(status: 200, headers: [
+            'Content-Type' => $contentType,
+            'Content-Disposition' => 'inline; filename="' . basename($filename) . '"',
+            'Cache-Control' => 'public, max-age=0, must-revalidate',
+            'Content-Length' => (string) (filesize($path) ?: 0),
+        ])->withBody($stream);
+    }
+
+    private function queryString(ServerRequestInterface $request, string $key): ?string
+    {
+        $value = $request->getQueryParams()[$key] ?? null;
+        return is_string($value) ? $value : null;
+    }
+
+    private function configBool(string $key): bool
+    {
+        return phpb_config($key) === true;
+    }
+
+    private function configString(string $key, string $default = ''): string
+    {
+        $value = phpb_config($key);
+        return is_string($value) ? $value : $default;
+    }
+
+    /** @return array<string, mixed> */
+    private function configArray(string $key): array
+    {
+        $value = phpb_config($key);
+        return is_array($value) ? $this->stringKeyedArray($value) : [];
+    }
+
+    /**
+     * @param array<mixed> $data
+     * @return array<string, mixed>
+     */
+    private function stringKeyedArray(array $data): array
+    {
+        return array_filter($data, 'is_string', ARRAY_FILTER_USE_KEY);
+    }
+
+    private function requireAuthService(): AuthContract
+    {
+        return $this->auth ?? throw new LogicException('Authentication service is not configured.');
+    }
+
+    private function requireWebsiteManager(): WebsiteManagerContract
+    {
+        return $this->websiteManager ?? throw new LogicException('Website manager is not configured.');
+    }
+
+    private function requirePageBuilder(): PageBuilderContract
+    {
+        return $this->pageBuilder ?? throw new LogicException('Page builder is not configured.');
+    }
+
+    private function requireRouter(): RouterContract
+    {
+        return $this->router ?? throw new LogicException('Router is not configured.');
+    }
+
+    private function requireCache(): CacheContract
+    {
+        $cache = phpb_instance('cache');
+        return $cache instanceof CacheContract ? $cache : throw new LogicException('Cache service is not configured.');
     }
 }

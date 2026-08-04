@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo;
 
 use Vihzhuo\Contracts\ThemeContract;
@@ -9,42 +11,30 @@ use Vihzhuo\Modules\GrapesJS\PageRenderer;
 
 class ThemeBlock
 {
-    /**
-     * @var array $config
-     */
+    /** @var array<string, mixed> */
     protected array $config = [];
 
-    /**
-     * @var array $dynamicConfig
-     */
+    /** @var array<string, mixed> */
     public static array $dynamicConfig = [];
 
-    /**
-     * @var ?ThemeContract $theme
-     */
     protected ?ThemeContract $theme = null;
 
-    /**
-     * @var string $blockSlug
-     */
     protected string $blockSlug;
 
     /**
-     * @var bool $isExtension
      * Determines if a block was registered by an extension.
+     *
+     * @var bool $isExtension
      */
     protected bool $isExtension;
 
-    /**
-     * @var bool $extensionSlug
-     * Custom slug in case of extension.
-     */
-    protected string|bool|null $extensionSlug;
+    /** Custom slug in case of extension. */
+    protected ?string $extensionSlug;
 
     /**
      * Theme constructor.
      *
-     * @param ThemeContract $theme         the theme this block belongs to
+     * @param ThemeContract $theme The theme this block belongs to
      * @param string $blockSlug
      * @param bool $isExtension
      * @param string|null $extensionSlug
@@ -60,12 +50,13 @@ class ThemeBlock
         $this->isExtension = $isExtension;
         $this->extensionSlug = $extensionSlug;
         if (file_exists($this->getFolder() . '/config.php')) {
-            $this->config = require $this->getFolder() . '/config.php';
+            $config = require $this->getFolder() . '/config.php';
+            $this->config = is_array($config) ? self::stringKeyedArray($config) : [];
         }
 
         PageRenderer::setCanBeCached(
             (bool) ($this->config['cache'] ?? true),
-            $this->config['cache_lifetime'] ?? null
+            is_scalar($this->config['cache_lifetime'] ?? null) ? (string) $this->config['cache_lifetime'] : null
         );
     }
 
@@ -102,17 +93,19 @@ class ThemeBlock
     protected function getNamespace(): string
     {
         // return Namespace from the Config file of the Block if it is an extension. Used for Extensions.
-        if (isset( $this->config['namespace'])) {
-            return $this->config['namespace'];
+        if (isset($this->config['namespace'])) {
+            return is_string($this->config['namespace']) ? $this->config['namespace'] : '';
         }
 
         // return Namespace from Config file if exists;
-        if (phpb_config('theme.namespace')) {
-            return phpb_config('theme.namespace');
+        $configuredNamespace = phpb_config('theme.namespace');
+        if (is_string($configuredNamespace) && $configuredNamespace !== '') {
+            return $configuredNamespace;
         }
 
         // get namespace from directory structure if not provided:
-        $themesPath = phpb_config('theme.folder');
+        $configuredPath = phpb_config('theme.folder');
+        $themesPath = is_string($configuredPath) ? $configuredPath : '';
         $themesFolderName = basename($themesPath);
         $blockFolder = $this->getFolder();
         $namespacePath = $themesFolderName . str_replace($themesPath, '', $blockFolder);
@@ -242,22 +235,18 @@ class ThemeBlock
     public function getThumbPath(): string
     {
         $blockThumbsFolder = $this->theme->getFolder() . '/public/block-thumbs/';
-        return $blockThumbsFolder . md5($this->blockSlug) . '/' . md5(file_get_contents($this->getViewFile())) . '.jpg';
+        return $blockThumbsFolder . md5($this->blockSlug) . '/' . md5((string) file_get_contents($this->getViewFile())) . '.jpg';
     }
 
     public function getThumbUrl(): string
     {
-        return phpb_theme_asset('block-thumbs/' . md5($this->blockSlug) . '/' . md5(file_get_contents($this->getViewFile())) . '.jpg');
+        return phpb_theme_asset('block-thumbs/' . md5($this->blockSlug) . '/' . md5((string) file_get_contents($this->getViewFile())) . '.jpg');
     }
 
-    /**
-     * Return the slug identifying this type of block.
-     *
-     * @return bool|string|null
-     */
-    public function getSlug(): bool|string|null
+    /** Return the slug identifying this type of block. */
+    public function getSlug(): string
     {
-        return ($this->isExtension) ? $this->extensionSlug : $this->blockSlug;
+        return ($this->isExtension) ? ($this->extensionSlug ?? $this->blockSlug) : $this->blockSlug;
     }
 
     /**
@@ -283,18 +272,19 @@ class ThemeBlock
     /**
      * The wrapper element to be used in the pagebuilder and for carrying style in case this block is a PHP block.
      */
-    public function getWrapperElement()
+    public function getWrapperElement(): string
     {
-        return $this->config['wrapper'] ?? 'div';
+        $wrapper = $this->config['wrapper'] ?? 'div';
+        return is_string($wrapper) ? $wrapper : 'div';
     }
 
     /**
      * Return configuration with the given key (as dot-separated multidimensional array selector).
      *
-     * @param $key
+     * @param string|null $key
      * @return mixed
      */
-    public function get($key = null): mixed
+    public function get(?string $key = null): mixed
     {
         if (empty($key)) {
             return $this->config;
@@ -306,62 +296,81 @@ class ThemeBlock
 
         // if dot notation is used, traverse config string
         $segments = explode('.', $key);
-        $subArray = $this->config;
+        $value = $this->config;
         foreach ($segments as $segment) {
-            if (isset($subArray[$segment])) {
-                $subArray = &$subArray[$segment];
-            } else {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
                 return null;
             }
+            $value = $value[$segment];
         }
 
-        return $subArray;
+        return $value;
     }
 
     /**
      * Replace configuration at the given key (as dot-separated multidimensional array selector) by the given value.
      *
-     * @param $slug
-     * @param $key
-     * @param $value
+     * @param string $slug
+     * @param string|null $key
+     * @param mixed $value
      * @return void
      */
-    public static function set($slug, $key, $value): void
+    public static function set(string $slug, ?string $key = null, mixed $value = null): void
     {
         if (empty($key)) {
             self::$dynamicConfig[$slug] = $value;
             return;
         }
-        // if no dot notation is used, replace first dimension value or empty string
-        if (!str_contains($key, '.')) {
-            self::$dynamicConfig[$slug][$key] = $value;
-            return;
-        }
-
-        // if dot notation is used, traverse config and replace at the right depth
         $segments = explode('.', $key);
-        $subArray = &self::$dynamicConfig[$slug];
-        foreach ($segments as $i => $segment) {
-            if (isset($subArray[$segment])) {
-                if ($i === count($segments) - 1) {
-                    $subArray[$segment] = $value;
-                } else {
-                    $subArray = &$subArray[$segment];
-                }
-            } else {
-                return;
-            }
-        }
+        $current = self::$dynamicConfig[$slug] ?? [];
+        self::$dynamicConfig[$slug] = self::withNestedValue(
+            is_array($current) ? self::stringKeyedArray($current) : [],
+            $segments,
+            $value
+        );
     }
 
     /**
      * Get all dynamic configuration of the block with the given slug.
      *
-     * @param $slug
+     * @param string $slug
      * @return mixed
      */
-    public static function getDynamicConfig($slug): mixed
+    public static function getDynamicConfig(string $slug): mixed
     {
         return self::$dynamicConfig[$slug] ?? null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param list<string> $segments
+     * @return array<string, mixed>
+     */
+    private static function withNestedValue(array $data, array $segments, mixed $value): array
+    {
+        $segment = array_shift($segments);
+        if ($segment === null) {
+            return $data;
+        }
+        if ($segments === []) {
+            $data[$segment] = $value;
+            return $data;
+        }
+        $child = $data[$segment] ?? [];
+        $data[$segment] = self::withNestedValue(
+            is_array($child) ? self::stringKeyedArray($child) : [],
+            $segments,
+            $value
+        );
+        return $data;
+    }
+
+    /**
+     * @param array<mixed> $data
+     * @return array<string, mixed>
+     */
+    private static function stringKeyedArray(array $data): array
+    {
+        return array_filter($data, 'is_string', ARRAY_FILTER_USE_KEY);
     }
 }

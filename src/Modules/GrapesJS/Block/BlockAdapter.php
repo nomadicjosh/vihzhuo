@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Modules\GrapesJS\Block;
 
 use Vihzhuo\Modules\GrapesJS\PageRenderer;
@@ -15,14 +17,8 @@ use Exception;
  */
 class BlockAdapter
 {
-    /**
-     * @var ?PageRenderer $pageRenderer
-     */
     protected ?PageRenderer $pageRenderer = null;
 
-    /**
-     * @var ?ThemeBlock $block
-     */
     protected ?ThemeBlock $block = null;
 
     /**
@@ -54,8 +50,9 @@ class BlockAdapter
      */
     public function getTitle(): string
     {
-        if ($this->block->get('title')) {
-            return $this->block->get('title');
+        $title = $this->block->get('title');
+        if (is_string($title) && $title !== '') {
+            return $title;
         }
         return str_replace('-', ' ', ucfirst($this->getSlug()));
     }
@@ -67,16 +64,18 @@ class BlockAdapter
      */
     public function getCategory(): ?string
     {
-        if ($this->block->get('category')) {
-            return $this->block->get('category');
+        $category = $this->block->get('category');
+        if (is_string($category) && $category !== '') {
+            return $category;
         }
-        return phpb_trans('pagebuilder.default-category');
+        $translated = phpb_trans('pagebuilder.default-category');
+        return is_string($translated) ? $translated : null;
     }
 
     /**
      * Return an array representation of the theme block, for adding as a block to GrapesJS.
      *
-     * @return array
+     * @return array<string, mixed>
      * @throws Exception
      */
     public function getBlockManagerArray(): array
@@ -96,8 +95,9 @@ class BlockAdapter
 
         if (empty($img)) {
             $iconClass = 'fa fa-bars';
-            if ($this->block->get('icon')) {
-                $iconClass = $this->block->get('icon');
+            $icon = $this->block->get('icon');
+            if (is_string($icon) && $icon !== '') {
+                $iconClass = $icon;
             }
             $data['attributes'] = ['class' => $iconClass];
         }
@@ -108,21 +108,23 @@ class BlockAdapter
     /**
      * Return the array of settings of the theme block, for populating the settings tab in the GrapesJS sidebar.
      *
-     * @return array
+     * @return list<array<string, mixed>>
      */
     public function getBlockSettingsArray(): array
     {
-        $blockSettings = $this->block::getDynamicConfig($this->getSlug())['settings'] ?? $this->block->get('settings');
+        $dynamic = $this->block::getDynamicConfig($this->getSlug());
+        $blockSettings = is_array($dynamic) ? ($dynamic['settings'] ?? null) : null;
+        $blockSettings ??= $this->block->get('settings');
         if ($this->block->isHtmlBlock() || ! is_array($blockSettings)) {
             return [];
         }
 
         $settings = [];
         foreach ($blockSettings as $name => $blockSetting) {
-            if (! isset($blockSetting['label'])) {
+            if (!is_string($name) || !is_array($blockSetting) || !isset($blockSetting['label'])) {
                 continue;
             }
-            $type = $blockSetting['type'] ?? 'text';
+            $type = is_string($blockSetting['type'] ?? null) ? $blockSetting['type'] : 'text';
 
             $setting = [
                 'type' => $type,

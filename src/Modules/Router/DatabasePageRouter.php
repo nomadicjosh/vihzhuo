@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Modules\Router;
 
 use Vihzhuo\Contracts\PageTranslationContract;
@@ -9,23 +11,17 @@ use Vihzhuo\Repositories\PageTranslationRepository;
 
 class DatabasePageRouter implements RouterContract
 {
-    /**
-     * @var ?PageRepository $pageRepository
-     */
     protected ?PageRepository $pageRepository = null;
 
-    /**
-     * @var ?PageTranslationRepository $pageTranslationRepository
-     */
     protected ?PageTranslationRepository $pageTranslationRepository = null;
 
     /**
-     * @var array $routeParameters
+     * @var array<string, string> $routeParameters
      */
     protected array $routeParameters = [];
 
     /**
-     * @var array $routeToPageTranslationIdMapping
+     * @var array<string, string> $routeToPageTranslationIdMapping
      */
     protected array $routeToPageTranslationIdMapping = [];
 
@@ -41,10 +37,10 @@ class DatabasePageRouter implements RouterContract
     /**
      * Return the page from database corresponding to the given URL.
      *
-     * @param $url
+     * @param string $url
      * @return PageTranslationContract|null
      */
-    public function resolve($url): ?PageTranslationContract
+    public function resolve(string $url): ?PageTranslationContract
     {
         // strip URL query parameters
         $url = explode('?', $url, 2)[0];
@@ -59,8 +55,8 @@ class DatabasePageRouter implements RouterContract
         $pageTranslations = $this->pageTranslationRepository->getAll(['id', 'route']);
         $routes = [];
         foreach ($pageTranslations as $pageTranslation) {
-            $route = $pageTranslation->route;
-            $this->routeToPageTranslationIdMapping[$route] = $pageTranslation->id;
+            $route = $pageTranslation->getRoute();
+            $this->routeToPageTranslationIdMapping[$route] = $pageTranslation->getId();
             $routeSegments = explode('/', $route);
             $routes[] = $routeSegments;
         }
@@ -89,10 +85,10 @@ class DatabasePageRouter implements RouterContract
     /**
      * Sort the given routes into the order in which they need to be evaluated.
      *
-     * @param $allRoutes
-     * @return array
+     * @param list<list<string>> $allRoutes
+     * @return list<list<string>>
      */
-    public function getRoutesInOrder($allRoutes): array
+    public function getRoutesInOrder(array $allRoutes): array
     {
         usort($allRoutes, [$this, "routeOrderComparison"]);
         return $allRoutes;
@@ -101,11 +97,11 @@ class DatabasePageRouter implements RouterContract
     /**
      * Compare two given routes and return -1,0,1 indicating which route should be evaluated first.
      *
-     * @param $route1
-     * @param $route2
+     * @param list<string> $route1
+     * @param list<string> $route2
      * @return int
      */
-    public function routeOrderComparison($route1, $route2): int
+    public function routeOrderComparison(array $route1, array $route2): int
     {
         // routes with more segments should be evaluated first
         if (count($route1) > count($route2)) {
@@ -141,8 +137,8 @@ class DatabasePageRouter implements RouterContract
      * Return the full page translation instance based on the given matched route or page translation id.
      * (this method is helpful when extending a router to perform additional checks after a route has been matched)
      *
-     * @param string $matchedRoute                  the matched route
-     * @param string $matchedPageTranslationId      the page translation id corresponding to the matched route
+     * @param string $matchedRoute                  The matched route.
+     * @param string $matchedPageTranslationId      The page translation id corresponding to the matched route.
      * @return PageTranslationContract|null
      */
     public function getMatchedPage(string $matchedRoute, string $matchedPageTranslationId): ?PageTranslationContract
@@ -157,11 +153,11 @@ class DatabasePageRouter implements RouterContract
     /**
      * Return whether the given URL segments match with the given route segments.
      *
-     * @param $urlSegments
-     * @param $routeSegments
+     * @param list<string> $urlSegments
+     * @param list<string> $routeSegments
      * @return bool
      */
-    protected function onRoute($urlSegments, $routeSegments): bool
+    protected function onRoute(array $urlSegments, array $routeSegments): bool
     {
         // URL does not match if segment counts don't match, except if the route ends with a *
         if (count($urlSegments) !== count($routeSegments) && end($routeSegments) !== '*') {

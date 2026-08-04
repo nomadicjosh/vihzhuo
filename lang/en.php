@@ -66,6 +66,14 @@ return [
         'toastr-switching-language-failed' => 'Error while switching language',
         'yes' => 'Yes',
         'no' => 'No',
+        'rte' => [
+            'source' => 'HTML source',
+            'source-title' => 'Edit HTML source',
+            'font-color' => 'Font color',
+            'font-size' => 'Font size',
+            'cancel' => 'Cancel',
+            'apply' => 'Apply',
+        ],
         'trait-manager' => [
             'link' => [
                 'text' => 'Text',

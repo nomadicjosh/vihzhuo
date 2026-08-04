@@ -1,24 +1,17 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Modules\GrapesJS\Block;
 
 use Vihzhuo\Contracts\PageContract;
 
 class BaseController
 {
-    /**
-     * @var ?BaseModel $model
-     */
     protected ?BaseModel $model = null;
 
-    /**
-     * @var ?PageContract $page
-     */
     protected ?PageContract $page = null;
 
-    /**
-     * @var bool $forPageBuilder
-     */
     protected bool $forPageBuilder;
 
     /**
@@ -38,8 +31,7 @@ class BaseController
     /**
      * Handle the current request.
      */
-    public function handleRequest()
+    public function handleRequest(): void
     {
     }
-
 }

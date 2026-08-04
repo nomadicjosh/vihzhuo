@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Contracts;
 
 interface CacheContract
@@ -10,7 +12,7 @@ interface CacheContract
      * @param string $relativeUrl
      * @return string|null
      */
-    public function getForUrl(string $relativeUrl);
+    public function getForUrl(string $relativeUrl): ?string;
 
     /**
      * Store the given page content for the given relative URL.
@@ -19,7 +21,7 @@ interface CacheContract
      * @param string $pageContent
      * @param int $cacheLifetime
      */
-    public function storeForUrl(string $relativeUrl, string $pageContent, int $cacheLifetime);
+    public function storeForUrl(string $relativeUrl, string $pageContent, int $cacheLifetime): void;
 
     /**
      * Return the cache storage path for the given relative URL.
@@ -44,5 +46,5 @@ interface CacheContract
      *
      * @param string $route
      */
-    public function invalidate(string $route);
+    public function invalidate(string $route): void;
 }

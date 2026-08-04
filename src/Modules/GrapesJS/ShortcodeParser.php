@@ -1,48 +1,47 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Modules\GrapesJS;
 
+use ReflectionException;
 use Vihzhuo\Repositories\PageTranslationRepository;
 use Exception;
 
 class ShortcodeParser
 {
-    /**
-     * @var ?PageRenderer $pageRenderer
-     */
     protected ?PageRenderer $pageRenderer = null;
 
     /**
-     * @var array $renderedBlocks
+     * @var array<string, array<string, array<string, mixed>>> $renderedBlocks
      */
     protected array $renderedBlocks = [];
 
     /**
-     * @var array $pages
+     * @var array<string, string> $pages
      */
     protected array $pages = [];
 
-    /**
-     * @var string $language
-     */
     protected string $language;
 
     /**
      * ShortcodeParser constructor.
      *
      * @param PageRenderer $pageRenderer
+     * @throws ReflectionException
      */
     public function __construct(PageRenderer $pageRenderer)
     {
         $this->pageRenderer = $pageRenderer;
 
-        $pageTranslations = (new PageTranslationRepository('page_translations'))->findWhere('locale', phpb_current_language());
+        $pageTranslations = new PageTranslationRepository('page_translations')
+            ->findWhere('locale', phpb_current_language());
         foreach ($pageTranslations as $pageTranslation) {
-            $routeTranslation = $pageTranslation->route;
+            $routeTranslation = $pageTranslation->getRoute();
             foreach (phpb_route_parameters() as $routeParameter => $value) {
                 $routeTranslation = str_replace('{' . $routeParameter . '}', $value, $routeTranslation);
             }
-            $this->pages[$pageTranslation->page_id] = $routeTranslation;
+            $this->pages[$pageTranslation->getPageId()] = $routeTranslation;
         }
     }
 
@@ -60,12 +59,12 @@ class ShortcodeParser
      * Perform the tasks for all shortcodes in the given html string.
      *
      * @param mixed $html
-     * @param array $context
+     * @param array<string, mixed> $context
      * @param int $maxDepth
-     * @return mixed|string
+     * @return string
      * @throws Exception
      */
-    public function doShortcodes(mixed $html, array $context = [], int $maxDepth = 25): mixed
+    public function doShortcodes(string $html, array $context = [], int $maxDepth = 25): string
     {
         if ($maxDepth === 0) {
             throw new Exception("Maximum doShortcodes depth has been reached, "
@@ -82,7 +81,7 @@ class ShortcodeParser
      * Render all blocks defined with shortcodes in the given html string.
      *
      * @param string $html
-     * @param array $context
+     * @param array<string, mixed> $context
      * @param int $maxDepth
      * @return string
      * @throws Exception
@@ -100,19 +99,31 @@ class ShortcodeParser
             }
             $slug = $match['attributes']['slug'];
             $id = $match['attributes']['id'] ?? $slug;
-            if (isset($context[$id]['settings']['attributes'])) {
+            $blockContext = $context[$id] ?? [];
+            $blockContext = is_array($blockContext) ? $blockContext : [];
+            $settings = $blockContext['settings'] ?? [];
+            $settings = is_array($settings) ? $settings : [];
+            $attributes = $settings['attributes'] ?? [];
+            if (is_array($attributes)) {
                 foreach ($match['attributes'] as $attribute => $value) {
-                    if (in_array($attribute, ['id', 'slug'])) {
+                    if (in_array($attribute, ['id', 'slug'], true)) {
                         continue;
                     }
-                    $context[$id]['settings']['attributes'][$attribute] = $value;
+                    $attributes[$attribute] = $value;
                 }
+                $settings['attributes'] = $attributes;
+                $blockContext['settings'] = $settings;
+                $context[$id] = $blockContext;
             }
             $blockHtml = $this->pageRenderer->renderBlock($slug, $id, $context, $maxDepth);
 
             // store rendered block in a structure used for outputting all blocks to the pagebuilder
             if (phpb_in_editmode() && str_starts_with($id, 'ID')) {
-                $this->renderedBlocks[$this->language][$id] = $context[$id] ?? [];
+                $this->renderedBlocks[$this->language][$id] = array_filter(
+                    $blockContext,
+                    'is_string',
+                    ARRAY_FILTER_USE_KEY
+                );
                 $this->renderedBlocks[$this->language][$id]['html'] = $blockHtml;
             }
 
@@ -128,12 +139,11 @@ class ShortcodeParser
 
     /**
      * Replace all page shortcodes for the corresponding absolute page url.
-     * @todo this currently replaces the shortcode with page route instead of URL
      *
-     * @param mixed $html
-     * @return mixed
+     * @param string $html
+     * @return string
      */
-    protected function doPageShortcodes(mixed $html): mixed
+    protected function doPageShortcodes(string $html): string
     {
         if (phpb_in_editmode()) {
             return $html;
@@ -163,10 +173,10 @@ class ShortcodeParser
     /**
      * Replace all [theme-url] shortcodes for the absolute URL to the theme's public folder.
      *
-     * @param mixed $html
-     * @return mixed
+     * @param string $html
+     * @return string
      */
-    protected function doThemeUrlShortcodes(mixed $html): mixed
+    protected function doThemeUrlShortcodes(string $html): string
     {
         $matches = self::findMatches('theme-url', $html);
 
@@ -175,7 +185,9 @@ class ShortcodeParser
         }
 
         foreach ($matches as $match) {
-            $themeUrl = phpb_config('theme.folder_url') . '/' . phpb_e(phpb_config('theme.active_theme'));
+            $folderUrl = phpb_config('theme.folder_url');
+            $activeTheme = phpb_config('theme.active_theme');
+            $themeUrl = (is_string($folderUrl) ? $folderUrl : '/themes') . '/' . phpb_e($activeTheme);
             $html = str_replace($match['shortcode'], $themeUrl, $html);
         }
 
@@ -185,10 +197,10 @@ class ShortcodeParser
     /**
      * Replace all [blocks-container] shortcodes for a <div phpb-blocks-container></div>
      *
-     * @param mixed $html
-     * @return mixed
+     * @param string $html
+     * @return string
      */
-    protected function doBlocksContainerShortcodes(mixed $html): mixed
+    protected function doBlocksContainerShortcodes(string $html): string
     {
         $matches = self::findMatches('blocks-container', $html);
 
@@ -207,22 +219,24 @@ class ShortcodeParser
     /**
      * Return all matches of the given shortcode in the given html string.
      *
-     * @param $shortcode
-     * @param $html
-     * @return array            an array with for each $shortcode occurrence an array of attributes
+     * @param string $shortcode
+     * @param string $html
+     * @return list<array{shortcode: string, attributes: array<string, string>}> An array with for each $shortcode
+     *                                                                           occurrence an array of attributes.
      */
-    public static function findMatches($shortcode, $html): array
+    public static function findMatches(string $shortcode, string $html): array
     {
         // RegEx: https://www.regextester.com/104625
-        $regex = '/\[' . $shortcode . '(\s.*?)?\](?:([^\[]+)?\[\/' . $shortcode . '\])?/';
+        $quotedShortcode = preg_quote($shortcode, '/');
+        $regex = '/\[' . $quotedShortcode . '(\s.*?)?\](?:([^\[]+)?\[\/' . $quotedShortcode . '\])?/';
         preg_match_all($regex, $html, $pregMatchAll);
-        $fullMatches = $pregMatchAll[0];
-        $matchAttributeStrings = $pregMatchAll[1];
+        $fullMatches = $pregMatchAll[0] ?? [];
+        $matchAttributeStrings = $pregMatchAll[1] ?? [];
 
         // loop through the attribute strings of each $shortcode instance and add the parsed variants to $matches
         $matches = [];
         foreach ($matchAttributeStrings as $i => $matchAttributeString) {
-            $matchAttributeString = trim($matchAttributeString);
+            $matchAttributeString = trim((string) $matchAttributeString);
 
             // as long as there are attributes in the attributes string, add them to $attributes
             $attributes = [];
@@ -232,10 +246,11 @@ class ShortcodeParser
 
                 // if first char is " and at least two " exist, get attribute value between ""
                 if (str_starts_with($remainingString, '"') && strpos($remainingString, '"', 1) !== false) {
-                    [$empty, $value, $remainingString] = explode('"', $remainingString, 3);
+                    [, $value, $remainingString] = explode('"', $remainingString, 3);
                     $attributes[$attribute] = $value;
                 } elseif (str_contains($remainingString, ' ')) {
-                    // attribute value was not between "", get value until next whitespace or until end of $remainingString
+                    // attribute value was not between "", get value until next
+                    // whitespace or until end of $remainingString
                     [$value, $remainingString] = explode(' ', $remainingString, 2);
                     $attributes[$attribute] = $value;
                 } else {
@@ -247,7 +262,7 @@ class ShortcodeParser
             }
 
             $matches[] = [
-                'shortcode' => $fullMatches[$i],
+                'shortcode' => (string) ($fullMatches[$i] ?? ''),
                 'attributes' => $attributes
             ];
         }
@@ -266,11 +281,10 @@ class ShortcodeParser
     /**
      * Return the array of all blocks rendered while parsing shortcodes.
      *
-     * @return array
+     * @return array<string, array<string, array<string, mixed>>>
      */
     public function getRenderedBlocks(): array
     {
         return $this->renderedBlocks;
     }
-
 }

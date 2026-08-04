@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Contracts;
 
 interface PageContract
@@ -7,87 +9,87 @@ interface PageContract
     /**
      * Set the data stored for this page.
      *
-     * @param array|null $data
-     * @param bool $fullOverwrite       whether to fully overwrite or extend existing data
+     * @param array<string, mixed>|null $data
+     * @param bool $fullOverwrite Whether to fully overwrite or extend existing data
      */
-    public function setData(?array $data = null, bool $fullOverwrite = true);
+    public function setData(?array $data = null, bool $fullOverwrite = true): void;
 
     /**
      * Set the translation data of this page.
      *
-     * @param array|null $translationData
+     * @param array<string, array<string, mixed>>|null $translationData
      */
-    public function setTranslations(?array $translationData = null);
+    public function setTranslations(?array $translationData = null): void;
 
     /**
      * Return all data stored for this page (page builder data and other data set via setData).
      *
-     * @return array|null
+     * @return array<string, mixed>|null
      */
-    public function getData();
+    public function getData(): ?array;
 
     /**
      * Return the page builder data stored for this page.
      *
-     * @return array|null
+     * @return array<string, mixed>
      */
-    public function getBuilderData();
+    public function getBuilderData(): array;
 
     /**
      * Return the id of this page.
      *
      * @return string
      */
-    public function getId();
+    public function getId(): string;
 
     /**
      * Return the layout (file name) of this page.
      *
      * @return string
      */
-    public function getLayout();
+    public function getLayout(): string;
 
     /**
      * Return the name of this page.
      *
      * @return string
      */
-    public function getName();
+    public function getName(): string;
 
     /**
      * Return the given language dependant setting for this page, in the current or in the given language.
      *
      * @param string $setting
      * @param string|null $locale
-     * @return mixed|string|null
+     * @return mixed
      */
-    public function getTranslation(string $setting, ?string $locale = null);
+    public function getTranslation(string $setting, ?string $locale = null): mixed;
 
     /**
      * Return the translated settings of this page.
      *
-     * @return array
+     * @return array<string, array<string, mixed>>
      */
-    public function getTranslations();
+    public function getTranslations(): array;
 
     /**
      * Return the route of this page, in the current or in the given language.
      *
      * @param string|null $locale
-     * @return mixed
+     * @return string
      */
-    public function getRoute(?string $locale = null);
+    public function getRoute(?string $locale = null): string;
 
     /**
      * Get the value of the given property of this Page.
      *
-     * @param $property
+     * @param string $property
      * @return mixed|null
      */
-    public function get($property);
+    public function get(string $property): mixed;
 
     /**
      * Invalidate all cached variants of this page.
      */
-    public function invalidateCache();
+    public function invalidateCache(): void;
 }

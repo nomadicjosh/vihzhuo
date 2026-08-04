@@ -1,13 +1,18 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Repositories;
 
+use JsonException;
+use ReflectionException;
 use Vihzhuo\Contracts\PageContract;
 use Vihzhuo\Contracts\PageRepositoryContract;
 use Exception;
 
 use function phpb_config;
 
+/** @extends BaseRepository<PageContract> */
 class PageRepository extends BaseRepository implements PageRepositoryContract
 {
     /**
@@ -15,41 +20,51 @@ class PageRepository extends BaseRepository implements PageRepositoryContract
      *
      * @var string
      */
-    protected $table;
+    protected string $table;
 
     /**
      * The class that represents each page.
      *
-     * @var string
+     * @var class-string<PageContract>
      */
-    protected $class;
+    protected string $class;
 
     /**
      * PageRepository constructor.
+     *
+     * @throws Exception
      */
     public function __construct()
     {
-        $this->table = empty(phpb_config('page.table')) ? 'pages' : phpb_config('page.table');
+        $configuredTable = phpb_config('page.table');
+        $this->table = is_string($configuredTable) && $configuredTable !== '' ? $configuredTable : 'pages';
         parent::__construct();
-        $this->class = phpb_instance('page');
+        $pageClass = phpb_static('page');
+        if ($pageClass === null || !is_a($pageClass, PageContract::class, true)) {
+            throw new Exception('Configured page class must implement PageContract.');
+        }
+        $this->class = $pageClass;
     }
 
     /**
      * Create a new page.
      *
-     * @param array $data
-     * @return bool|object|null
+     * @param array<string, mixed> $data
+     * @return PageContract|false
      * @throws Exception
      */
-    public function create(array $data)
+    public function create(array $data): PageContract|false
     {
-        foreach (['name', 'layout', 'show_in_nav', 'nav_position', 'nav_type'] as $field) {
-            if (! isset($data[$field]) || ! is_string($data[$field])) {
-                return false;
-            }
+        if (
+            array_any(
+                ['name', 'layout', 'show_in_nav', 'nav_position', 'nav_type'],
+                fn($field) => !isset($data[$field]) || !is_string($data[$field])
+            )
+        ) {
+            return false;
         }
 
-        $page = parent::create([
+        $page = $this->createRecord([
             'name' => $data['name'],
             'layout' => $data['layout'],
             'show_in_nav' => $data['show_in_nav'],
@@ -59,27 +74,30 @@ class PageRepository extends BaseRepository implements PageRepositoryContract
         if (! ($page instanceof PageContract)) {
             throw new Exception("Page not of type PageContract");
         }
-        return $this->replaceTranslations($page, $data);
+        return $this->replaceTranslations($page, $data) ? $page : false;
     }
 
     /**
      * Update the given page with the given updated data.
      *
-     * @param $page
-     * @param array $data
-     * @return bool|object|null
+     * @param PageContract $page
+     * @param array<string, mixed> $data
+     * @return bool
      */
-    public function update($page, array $data)
+    public function update(PageContract $page, array $data): bool
     {
-        foreach (['name', 'layout', 'show_in_nav', 'nav_position', 'nav_type'] as $field) {
-            if (! isset($data[$field]) || ! is_string($data[$field])) {
-                return false;
-            }
+        if (
+            array_any(
+                ['name', 'layout', 'show_in_nav', 'nav_position', 'nav_type'],
+                fn($field) => !isset($data[$field]) || !is_string($data[$field])
+            )
+        ) {
+            return false;
         }
 
         $this->replaceTranslations($page, $data);
 
-        $updateResult = parent::update($page, [
+        $updateResult = $this->updateRecord($page, [
             'name' => $data['name'],
             'layout' => $data['layout'],
             'show_in_nav' => $data['show_in_nav'],
@@ -94,30 +112,46 @@ class PageRepository extends BaseRepository implements PageRepositoryContract
      * Replace the translations of the given page by the given data.
      *
      * @param PageContract $page
-     * @param array $data
+     * @param array<string, mixed> $data
      * @return bool
      */
-    protected function replaceTranslations(PageContract $page, array $data)
+    protected function replaceTranslations(PageContract $page, array $data): bool
     {
         $activeLanguages = phpb_active_languages();
         foreach (['title', 'meta_title', 'meta_description', 'route'] as $field) {
-            foreach ($activeLanguages as $languageCode => $languageTranslation) {
-                if (! isset($data[$field][$languageCode])) {
-                    return false;
-                }
+            $translations = $data[$field] ?? null;
+            if (!is_array($translations)) {
+                return false;
+            }
+            if (
+                array_any(
+                    $activeLanguages,
+                    fn($languageTranslation, $languageCode) => !is_string($translations[$languageCode] ?? null)
+                )
+            ) {
+                return false;
             }
         }
 
-        $pageTranslationRepository = new PageTranslationRepository;
-        $pageTranslationRepository->destroyWhere(phpb_config('page.translation.foreign_key'), $page->getId());
+        $pageTranslationRepository = new PageTranslationRepository();
+        $configuredForeignKey = phpb_config('page.translation.foreign_key');
+        $foreignKey = is_string($configuredForeignKey) ? $configuredForeignKey : 'page_id';
+        $pageTranslationRepository->destroyWhere($foreignKey, $page->getId());
         foreach ($activeLanguages as $languageCode => $languageTranslation) {
+            $title = $data['title'];
+            $metaTitle = $data['meta_title'];
+            $metaDescription = $data['meta_description'];
+            $route = $data['route'];
+            if (!is_array($title) || !is_array($metaTitle) || !is_array($metaDescription) || !is_array($route)) {
+                return false;
+            }
             $pageTranslationRepository->create([
-                phpb_config('page.translation.foreign_key') => $page->getId(),
+                $foreignKey => $page->getId(),
                 'locale' => $languageCode,
-                'title' => $data['title'][$languageCode],
-                'meta_title' => $data['meta_title'][$languageCode],
-                'meta_description' => $data['meta_description'][$languageCode],
-                'route' => $data['route'][$languageCode],
+                'title' => is_string($title[$languageCode] ?? null) ? $title[$languageCode] : '',
+                'meta_title' => is_string($metaTitle[$languageCode] ?? null) ? $metaTitle[$languageCode] : '',
+                'meta_description' => is_string($metaDescription[$languageCode] ?? null) ? $metaDescription[$languageCode] : '',
+                'route' => is_string($route[$languageCode] ?? null) ? $route[$languageCode] : '',
             ]);
         }
 
@@ -127,14 +161,15 @@ class PageRepository extends BaseRepository implements PageRepositoryContract
     /**
      * Update the given page with the given updated page data.
      *
-     * @param $page
-     * @param array $data
-     * @return bool|object|null
+     * @param PageContract $page
+     * @param array<string, mixed> $data
+     * @return bool
+     * @throws JsonException
      */
-    public function updatePageData($page, array $data)
+    public function updatePageData(PageContract $page, array $data): bool
     {
-        $updateResult = parent::update($page, [
-                'data' => json_encode($data),
+        $updateResult = $this->updateRecord($page, [
+            'data' => json_encode($data, JSON_THROW_ON_ERROR),
         ]);
         $page->invalidateCache();
         return $updateResult;
@@ -143,12 +178,16 @@ class PageRepository extends BaseRepository implements PageRepositoryContract
     /**
      * Remove the given page from the database.
      *
-     * @param $id
+     * @param int|string $id
      * @return bool
+     * @throws ReflectionException
      */
-    public function destroy($id)
+    public function destroy(int|string $id): bool
     {
-        $this->findWithId($id)->invalidateCache();
+        $page = $this->findWithId($id);
+        if ($page instanceof PageContract) {
+            $page->invalidateCache();
+        }
 
         return parent::destroy($id);
     }
@@ -156,16 +195,19 @@ class PageRepository extends BaseRepository implements PageRepositoryContract
     /**
      * Return translations and their pages.
      *
-     * @param $id
-     * @return array
+     * @param string $id
+     * @return list<array<string, mixed>>
      */
-    public function findAllPages($id): array
+    public function findAllPages(string $id): array
     {
-        $prefix = phpb_config('storage.database.prefix');
+        $configuredPrefix = phpb_config('storage.database.prefix');
+        $prefix = is_string($configuredPrefix) ? preg_replace('/\W/', '', $configuredPrefix) : '';
+        $prefix = is_string($prefix) ? $prefix : '';
+        $foreignKey = preg_replace('/\W/', '', $id) ?: 'page_id';
 
         $query = $this->db->rawQuery(
             query: "SELECT DISTINCT pages.id, pages.show_in_nav, pages.nav_position, pages.nav_type, trans.title, " .
-            "trans.route FROM {$prefix}pages AS pages JOIN {$prefix}page_translations AS trans ON pages.id = trans.{$id}"
+            "trans.route FROM {$prefix}pages AS pages JOIN {$prefix}page_translations AS trans ON pages.id = trans.{$foreignKey}"
         );
 
         return $query;

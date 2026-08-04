@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo\Contracts;
 
 interface SettingContract
@@ -8,9 +10,9 @@ interface SettingContract
      * Return the value(s) of the given setting.
      *
      * @param string $key
-     * @return mixed|null
+     * @return string|list<string>|null
      */
-    public static function get(string $key);
+    public static function get(string $key): string|array|null;
 
     /**
      * Return whether the given setting exists and has the given value.
@@ -19,5 +21,5 @@ interface SettingContract
      * @param string $value
      * @return bool
      */
-    public static function has(string $key, string $value);
+    public static function has(string $key, string $value): bool;
 }

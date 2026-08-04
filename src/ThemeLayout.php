@@ -1,37 +1,29 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Vihzhuo;
 
 use Vihzhuo\Contracts\ThemeContract;
 
 class ThemeLayout
 {
-    /**
-     * @var array $config
-     */
+    /** @var array<string, mixed> */
     protected array $config = [];
 
-    /**
-     * @var ?ThemeContract $theme
-     */
     protected ?ThemeContract $theme = null;
 
-    /**
-     * @var string $layoutSlug
-     */
     protected string $layoutSlug;
 
     /**
-     * @var bool $isExtension
      * Determines if a block was registered by an extension.
+     *
+     * @var bool $isExtension
      */
     protected bool $isExtension;
 
-    /**
-     * @var bool $extensionSlug
-     * Custom slug in case of extension.
-     */
-    protected string|bool|null $extensionSlug;
+    /** Custom slug in case of extension. */
+    protected ?string $extensionSlug;
 
     /**
      * Theme ThemeLayout.
@@ -52,7 +44,8 @@ class ThemeLayout
         $this->isExtension = $isExtension;
         $this->extensionSlug = $extensionSlug;
         if (file_exists($this->getFolder() . '/config.php')) {
-            $this->config = include $this->getFolder() . '/config.php';
+            $config = include $this->getFolder() . '/config.php';
+            $this->config = is_array($config) ? $this->stringKeyedArray($config) : [];
         }
     }
 
@@ -76,33 +69,26 @@ class ThemeLayout
         return $this->getFolder() . '/view.php';
     }
 
-    /**
-     * Return the slug identifying this type of layout.
-     *
-     * @return bool|string|null
-     */
-    public function getSlug(): bool|string|null
+    /** Return the slug identifying this type of layout. */
+    public function getSlug(): string
     {
-        return $this->isExtension ? $this->extensionSlug : $this->layoutSlug;
+        return $this->isExtension ? ($this->extensionSlug ?? $this->layoutSlug) : $this->layoutSlug;
     }
 
-    /**
-     * Return the title of this theme layout.
-     *
-     * @return array|string
-     */
-    public function getTitle(): array|string
+    /** Return the title of this theme layout. */
+    public function getTitle(): string
     {
-        return $this->get('title') ?? ucfirst($this->getSlug());
+        $title = $this->get('title');
+        return is_string($title) ? $title : ucfirst($this->getSlug());
     }
 
     /**
      * Return configuration with the given key (as dot-separated multidimensional array selector).
      *
-     * @param $key
+     * @param string $key
      * @return mixed|string
      */
-    public function get($key): mixed
+    public function get(string $key): mixed
     {
         // if no dot notation is used, return first dimension value or empty string
         if (!str_contains($key, '.')) {
@@ -111,15 +97,23 @@ class ThemeLayout
 
         // if dot notation is used, traverse config string
         $segments = explode('.', $key);
-        $subArray = $this->config;
+        $value = $this->config;
         foreach ($segments as $segment) {
-            if (isset($subArray[$segment])) {
-                $subArray = &$subArray[$segment];
-            } else {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
                 return null;
             }
+            $value = $value[$segment];
         }
 
-        return $subArray;
+        return $value;
+    }
+
+    /**
+     * @param array<mixed> $data
+     * @return array<string, mixed>
+     */
+    private function stringKeyedArray(array $data): array
+    {
+        return array_filter($data, 'is_string', ARRAY_FILTER_USE_KEY);
     }
 }

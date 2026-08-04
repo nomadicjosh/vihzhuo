@@ -1,5 +1,7 @@
 <?php
-$setting = phpb_instance('setting');
+$settingClass = phpb_static('setting');
+$languageTranslations = phpb_trans('languages');
+$languageTranslations = is_array($languageTranslations) ? $languageTranslations : [];
 ?>
 
 <form method="post" action="<?= phpb_url('website_manager', ['route' => 'settings', 'action' => 'update', 'tab' => 'settings']) ?>">
@@ -21,9 +23,13 @@ $setting = phpb_instance('setting');
             </label>
             <select class="form-control" id="languages" name="languages[]" title="<?= phpb_trans('website-manager.languages-selector-placeholder') ?>" required multiple>
                 <?php
-                foreach (phpb_trans('languages') as $locale => $localeText):
+                foreach ($languageTranslations as $locale => $localeText):
+                    if (!is_string($locale) || !is_string($localeText)) {
+                        continue;
+                    }
+                    $selected = $settingClass !== null && $settingClass::has('languages', $locale);
                 ?>
-                <option value="<?= phpb_e($locale) ?>" <?= phpb_e($setting::has('languages', $locale)) !== '' && phpb_e($setting::has('languages', $locale)) !== '0' ? 'selected' : '' ?>><?= phpb_e($localeText) ?></option>
+                <option value="<?= phpb_e($locale) ?>" <?= $selected ? 'selected' : '' ?>><?= phpb_e($localeText) ?></option>
                 <?php
                 endforeach;
                 ?>
