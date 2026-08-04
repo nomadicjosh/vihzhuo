@@ -545,18 +545,29 @@ Dynamic block views receive:
 
 ### Block configuration reference
 
-| Key              | Type           | Meaning                                                                                               |
-|------------------|----------------|-------------------------------------------------------------------------------------------------------|
-| `title`          | `string`       | Sidebar label. Defaults to a title derived from the slug.                                             |
-| `category`       | `string`       | Sidebar category. Defaults to the translated default category.                                        |
-| `icon`           | `string`       | Font Awesome class used when no generated thumbnail exists.                                           |
-| `hidden`         | `bool`         | When `true`, the block can be rendered by another block but is hidden from the block picker.          |
-| `settings`       | `array`        | Settings shown for dynamic `view.php` blocks.                                                         |
-| `wrapper`        | `string`       | Trusted HTML tag used to wrap a styled dynamic block; defaults to `div`.                              |
-| `cache`          | `bool`         | Set to `false` when this block makes a rendered page unsafe to cache.                                 |
-| `cache_lifetime` | `int           | string`                                                                                               | Maximum page-cache lifetime in minutes when this block is present. |
-| `whitelist`      | `list<string>` | Only register the block when the current full URL contains one of these trusted domain/string values. |
-| `namespace`      | `string`       | Namespace containing this block's optional `Model` and `Controller` classes.                          |
+| Key              | Type           | Meaning                                                                                                                                                                                                          |
+|------------------|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `title`          | `string`       | Sidebar label. Defaults to a title derived from the slug.                                                                                                                                                        |
+| `category`       | `string`       | Sidebar category. Defaults to the translated default category.                                                                                                                                                   |
+| `icon`           | `string`       | Font Awesome class used when no generated thumbnail exists.                                                                                                                                                      |
+| `hidden`         | `bool`         | When `true`, the block can be rendered by another block but is hidden from the block picker.                                                                                                                     |
+| `settings`       | `array`        | Settings shown for dynamic `view.php` blocks.                                                                                                                                                                    |
+| `wrapper`        | `string`       | Trusted HTML tag used to wrap a styled dynamic block; defaults to `div`.                                                                                                                                         |
+| `cache`          | `bool`         | Set to `false` when this block makes a rendered page unsafe to cache.                                                                                                                                            |
+| `cache_lifetime` | positive `int` | Maximum cache lifetime, in minutes, for a rendered page containing this block. When multiple cached blocks specify a lifetime, the shortest lifetime wins. The default upper limit is one week (10,080 minutes). |
+| `whitelist`      | `list<string>` | Only register the block when the current full URL contains one of these trusted domain/string values.                                                                                                            |
+| `namespace`      | `string`       | Namespace containing this block's optional `Model` and `Controller` classes.                                                                                                                                     |
+
+`cache_lifetime` only affects rendered-page caching when global caching is enabled and the block permits caching. Omit it to retain the current page lifetime. Use a positive whole number to shorten the lifetime; numeric strings are accepted for compatibility. To prevent a page containing the block from being cached at all, set `'cache' => false` instead of setting the lifetime to zero.
+
+For example, if a page contains one block with a 60-minute lifetime and another with a 15-minute lifetime, the complete rendered page expires after 15 minutes:
+
+```php
+return [
+    'cache' => true,
+    'cache_lifetime' => 15,
+];
+```
 
 Example of a block available only on selected installations:
 
