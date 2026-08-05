@@ -170,7 +170,7 @@ $vihzhuo = new Vihzhuo($config);
 $request = ServerRequestFactory::fromGlobals();
 $response = $vihzhuo->handleRequest($request);
 
-(new SapiEmitter())->emit($response);
+new SapiEmitter()->emit($response);
 ```
 
 A complete example is available in [`examples/index.php`](examples/index.php).
@@ -978,6 +978,8 @@ Extensions::addLayouts([
 An extension block/layout folder follows the same file conventions as a theme folder. Give custom PHP block classes an explicit `namespace` in their block configuration.
 
 Registrations must happen before the theme is enumerated—normally before calling `handleRequest()`.
+
+See [`examples/register-blocks.php`](examples/register-blocks.php) and the accompanying [`examples/blocks`](examples/blocks) directory for complete static and dynamic extension block examples.
 
 ## Customizing GrapesJS
 

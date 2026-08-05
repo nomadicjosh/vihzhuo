@@ -7,6 +7,7 @@ use Qubus\Http\ServerRequestFactory;
 use Vihzhuo\Vihzhuo;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
+require __DIR__ . '/register-blocks.php';
 
 $config = require dirname(__DIR__) . '/config/config.php';
 if (!is_array($config)) {
