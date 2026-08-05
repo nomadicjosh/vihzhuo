@@ -2,7 +2,7 @@
 
 This directory contains two blocks registered outside the active theme:
 
-- `editable-card` is a static `view.html` block. Its HTML is editable directly in GrapesJS, and its link uses the built-in link settings.
+- `editable-card` is a static `view.html` block. Its HTML is editable directly in Vihzhuo, and its link uses the built-in link settings.
 - `page-banner` is a dynamic `view.php` block. It demonstrates block settings, a custom model, a custom controller, safe URL handling, wrapper selection, and cache configuration.
 
 [`register-blocks.php`](register-blocks.php) maps public block slugs to their directories with `Extensions::addBlocks()`. [`index.php`](index.php) loads that registration file after Composer's autoloader and before constructing `Vihzhuo`:
