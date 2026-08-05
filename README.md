@@ -178,7 +178,7 @@ A complete example is available in [`examples/index.php`](examples/index.php).
 All manager, page-builder, public-page, upload, and Vihzhuo asset requests must reach this front controller. With PHP's development server:
 
 ```bash
-php -S 127.0.0.1:8080 -t public public/index.php
+php -S 127.0.0.1:8080 -t public
 ```
 
 Using the example `/admin` URLs, open:
