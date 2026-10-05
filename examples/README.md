@@ -15,3 +15,14 @@ $application = new Vihzhuo($config);
 ```
 
 Once the example front controller is running, both blocks appear in the page builder under the **Examples** category. Extension block directories use the same `config.php`, `view.html`/`view.php`, `model.php`, `controller.php`, and script conventions as theme blocks.
+
+## Example child theme
+
+The bundled [`demo-child`](themes/demo-child) theme overrides only the `hello-world` block. Its layout, CSS, and remaining blocks come from `demo`. Copy both folders from `examples/themes/` into your public themes directory, then add this to your theme configuration:
+
+```php
+'active_theme' => 'demo-child',
+'parents' => ['demo-child' => 'demo'],
+```
+
+See [the child theme guide](../README.md#child-themes) for configuration inheritance, complete replacements, and custom PHP classes.

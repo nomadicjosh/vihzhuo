@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Vihzhuo;
 
 use Vihzhuo\Contracts\ThemeContract;
+use Vihzhuo\Core\ThemeContext;
 use Vihzhuo\Modules\GrapesJS\Block\BaseController;
 use Vihzhuo\Modules\GrapesJS\Block\BaseModel;
 use Vihzhuo\Modules\GrapesJS\PageRenderer;
@@ -17,9 +18,11 @@ class ThemeBlock
     /** @var array<string, mixed> */
     public static array $dynamicConfig = [];
 
-    protected ?ThemeContract $theme = null;
+    protected ThemeContract $theme;
 
     protected string $blockSlug;
+
+    private ThemeResource $resource;
 
     /**
      * Determines if a block was registered by an extension.
@@ -49,10 +52,20 @@ class ThemeBlock
         $this->blockSlug = $blockSlug;
         $this->isExtension = $isExtension;
         $this->extensionSlug = $extensionSlug;
-        if (file_exists($this->getFolder() . '/config.php')) {
-            $config = require $this->getFolder() . '/config.php';
-            $this->config = is_array($config) ? self::stringKeyedArray($config) : [];
+        $this->resource = new ThemeResource(
+            $theme,
+            'blocks',
+            $isExtension ? ($extensionSlug ?? '') : $blockSlug,
+            $isExtension ? $blockSlug : null
+        );
+        // Preserve custom getFolder() implementations used by existing subclasses.
+        if ($this->getFolder() !== $this->resource->getFolder()) {
+            $this->resource = new ThemeResource($theme, 'blocks', '', $this->getFolder());
         }
+        $this->config = ThemeContext::run($theme, function (): array {
+            $this->resource->loadConfiguration(fn (string $file): mixed => require $file);
+            return $this->resource->getConfig();
+        });
 
         PageRenderer::setCanBeCached(
             (bool) ($this->config['cache'] ?? true),
@@ -67,22 +80,7 @@ class ThemeBlock
      */
     public function getFolder(): string
     {
-        if ($this->isExtension) {
-            return $this->blockSlug;
-        }
-        $folder = $this->theme->getFolder() . '/blocks/archived/' . basename($this->blockSlug);
-        if (file_exists($folder)) {
-            return $folder;
-        }
-        $folder = $this->theme->getFolder() . '/blocks/elements/' . basename($this->blockSlug);
-        if (file_exists($folder)) {
-            return $folder;
-        }
-        $folder = $this->theme->getFolder() . '/blocks/php/' . basename($this->blockSlug);
-        if (file_exists($folder)) {
-            return $folder;
-        }
-        return $this->theme->getFolder() . '/blocks/' . basename($this->blockSlug);
+        return $this->resource->getFolder();
     }
 
     /**
@@ -106,8 +104,13 @@ class ThemeBlock
         // get namespace from directory structure if not provided:
         $configuredPath = phpb_config('theme.folder');
         $themesPath = is_string($configuredPath) ? $configuredPath : '';
-        $themesFolderName = basename($themesPath);
         $blockFolder = $this->getFolder();
+        return $this->namespaceFromFolder($blockFolder, $themesPath);
+    }
+
+    private function namespaceFromFolder(string $blockFolder, string $themesPath): string
+    {
+        $themesFolderName = basename($themesPath);
         $namespacePath = $themesFolderName . str_replace($themesPath, '', $blockFolder);
 
         // convert each character after a - to uppercase
@@ -133,49 +136,44 @@ class ThemeBlock
      */
     public function getControllerClass(): string
     {
-        if (file_exists($this->getFolder() . '/controller.php')) {
-            return $this->getNamespace() . '\\Controller';
-        }
-        return BaseController::class;
+        $file = $this->getControllerFile();
+        return $file !== null ? $this->namespaceForFile($file) . '\\Controller' : BaseController::class;
     }
 
-    /**
-     * Return the controller file of this theme block.
-     *
-     * @return string|null
-     */
+    /** Return the controller file of this theme block. */
     public function getControllerFile(): ?string
     {
-        if (file_exists($this->getFolder() . '/controller.php')) {
-            return $this->getFolder() . '/controller.php';
-        }
-        return null;
+        return $this->resource->findFile(['controller.php']);
     }
 
-    /**
-     * Return the model class of this theme block.
-     *
-     * @return string
-     */
+    /** Return the model class of this theme block. */
     public function getModelClass(): string
     {
-        if (file_exists($this->getFolder() . '/model.php')) {
-            return $this->getNamespace() . '\\Model';
-        }
-        return BaseModel::class;
+        $file = $this->getModelFile();
+        return $file !== null ? $this->namespaceForFile($file) . '\\Model' : BaseModel::class;
     }
 
-    /**
-     * Return the model file of this theme block.
-     *
-     * @return string|null
-     */
+    /** Return the model file of this theme block. */
     public function getModelFile(): ?string
     {
-        if (file_exists($this->getFolder() . '/model.php')) {
-            return $this->getFolder() . '/model.php';
+        return $this->resource->findFile(['model.php']);
+    }
+
+    private function namespaceForFile(string $file): string
+    {
+        if (dirname($file) === $this->getFolder()) {
+            return $this->getNamespace();
         }
-        return null;
+        $namespace = $this->resource->getFileNamespace($file);
+        if ($namespace !== null) {
+            return $namespace;
+        }
+        $configuredNamespace = phpb_config('theme.namespace');
+        if (is_string($configuredNamespace) && $configuredNamespace !== '') {
+            return $configuredNamespace;
+        }
+        $configuredPath = phpb_config('theme.folder');
+        return $this->namespaceFromFolder(dirname($file), is_string($configuredPath) ? $configuredPath : '');
     }
 
     /**
@@ -185,10 +183,8 @@ class ThemeBlock
      */
     public function getViewFile(): string
     {
-        if ($this->isPhpBlock()) {
-            return $this->getFolder() . '/view.php';
-        }
-        return $this->getFolder() . '/view.html';
+        $name = $this->isPhpBlock() ? 'view.php' : 'view.html';
+        return $this->resource->findFile([$name]) ?? $this->getFolder() . '/' . $name;
     }
 
     /**
@@ -199,32 +195,21 @@ class ThemeBlock
      */
     public function getBuilderScriptFile(): ?string
     {
-        if (file_exists($this->getFolder() . '/builder-script.php')) {
-            return $this->getFolder() . '/builder-script.php';
-        } elseif (file_exists($this->getFolder() . '/builder-script.html')) {
-            return $this->getFolder() . '/builder-script.html';
-        } elseif (file_exists($this->getFolder() . '/builder-script.js')) {
-            return $this->getFolder() . '/builder-script.js';
-        }
-        return $this->getScriptFile();
+        return $this->resource->findFile(['builder-script.php', 'builder-script.html', 'builder-script.js'])
+        ?? $this->getScriptFile();
     }
 
     /**
      * Return the script file of this theme block.
-     * This script can be used to assist correct rendering of the block when used on a publicly accessed web page.
+     * This script can be used to assist correct
+     * rendering of the block when used on a
+     * publicly accessed web page.
      *
      * @return string|null
      */
     public function getScriptFile(): ?string
     {
-        if (file_exists($this->getFolder() . '/script.php')) {
-            return $this->getFolder() . '/script.php';
-        } elseif (file_exists($this->getFolder() . '/script.html')) {
-            return $this->getFolder() . '/script.html';
-        } elseif (file_exists($this->getFolder() . '/script.js')) {
-            return $this->getFolder() . '/script.js';
-        }
-        return null;
+        return $this->resource->findFile(['script.php', 'script.html', 'script.js']);
     }
 
     /**
@@ -234,13 +219,28 @@ class ThemeBlock
      */
     public function getThumbPath(): string
     {
-        $blockThumbsFolder = $this->theme->getFolder() . '/public/block-thumbs/';
-        return $blockThumbsFolder . md5($this->blockSlug) . '/' . md5((string) file_get_contents($this->getViewFile())) . '.jpg';
+        $folder = $this->usesInheritedTheme() ? '/block-thumbs/' : '/public/block-thumbs/';
+        return $this->theme->getFolder() . $folder . $this->thumbRelativePath();
     }
 
     public function getThumbUrl(): string
     {
-        return phpb_theme_asset('block-thumbs/' . md5($this->blockSlug) . '/' . md5((string) file_get_contents($this->getViewFile())) . '.jpg');
+        $path = 'block-thumbs/' . $this->thumbRelativePath();
+        return $this->theme instanceof Theme ? $this->theme->getAssetUrl($path) : phpb_theme_asset($path);
+    }
+
+    private function usesInheritedTheme(): bool
+    {
+        return count(ThemeResource::themeFolders($this->theme)) > 1;
+    }
+
+    private function thumbRelativePath(): string
+    {
+        // Preserve existing standalone thumbnail names and storage conventions.
+        $version = $this->usesInheritedTheme()
+        ? $this->resource->fingerprint()
+        : md5((string) file_get_contents($this->getViewFile()));
+        return md5($this->blockSlug) . '/' . $version . '.jpg';
     }
 
     /** Return the slug identifying this type of block. */
@@ -256,11 +256,11 @@ class ThemeBlock
      */
     public function isPhpBlock(): bool
     {
-        return file_exists($this->getFolder() . '/view.php');
+        return str_ends_with($this->resource->findFile(['view.php', 'view.html']) ?? '', '/view.php');
     }
 
     /**
-     * Return whether this block is a plain html block that does not contain/allow PHP code.
+     * Return whether this block is a plain HTML block that does not contain/allow PHP code.
      *
      * @return bool
      */

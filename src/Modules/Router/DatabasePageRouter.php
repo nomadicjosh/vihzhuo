@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Vihzhuo\Modules\Router;
 
+use ReflectionException;
 use Vihzhuo\Contracts\PageTranslationContract;
 use Vihzhuo\Contracts\RouterContract;
 use Vihzhuo\Repositories\PageRepository;
@@ -11,9 +12,9 @@ use Vihzhuo\Repositories\PageTranslationRepository;
 
 class DatabasePageRouter implements RouterContract
 {
-    protected ?PageRepository $pageRepository = null;
+    protected PageRepository $pageRepository;
 
-    protected ?PageTranslationRepository $pageTranslationRepository = null;
+    protected PageTranslationRepository $pageTranslationRepository;
 
     /**
      * @var array<string, string> $routeParameters
@@ -30,8 +31,8 @@ class DatabasePageRouter implements RouterContract
      */
     public function __construct()
     {
-        $this->pageRepository = new PageRepository;
-        $this->pageTranslationRepository = new PageTranslationRepository;
+        $this->pageRepository = new PageRepository();
+        $this->pageTranslationRepository = new PageTranslationRepository();
     }
 
     /**
@@ -39,6 +40,7 @@ class DatabasePageRouter implements RouterContract
      *
      * @param string $url
      * @return PageTranslationContract|null
+     * @throws ReflectionException
      */
     public function resolve(string $url): ?PageTranslationContract
     {
@@ -137,9 +139,10 @@ class DatabasePageRouter implements RouterContract
      * Return the full page translation instance based on the given matched route or page translation id.
      * (this method is helpful when extending a router to perform additional checks after a route has been matched)
      *
-     * @param string $matchedRoute                  The matched route.
-     * @param string $matchedPageTranslationId      The page translation id corresponding to the matched route.
+     * @param string $matchedRoute The matched route.
+     * @param string $matchedPageTranslationId The page translation id corresponding to the matched route.
      * @return PageTranslationContract|null
+     * @throws ReflectionException
      */
     public function getMatchedPage(string $matchedRoute, string $matchedPageTranslationId): ?PageTranslationContract
     {

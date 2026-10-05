@@ -1,6 +1,16 @@
 # Upgrade guide
 
-This release intentionally contains breaking changes.
+## Child theme update
+
+This update keeps existing theme APIs, `ThemeContract` implementations, extension priority, and saved block/layout slugs. Standalone themes need no migration. To enable inheritance, add `theme.parents` as a child => parent map and set `theme.active_theme` to the child. See [Child themes](README.md#child-themes) for partial overrides, complete replacements, asset fallback, and PHP namespaces.
+
+Theme identifiers and file paths now reject traversal and symlinks escaping their configured directories. Keep all themes in an inheritance chain inside `theme.folder`. Clear page caches when switching themes.
+
+For CMS integrations, a theme adapter can override `getParentThemeSlug()` to use existing parent metadata and `inheritsResourceFiles()` to choose whole-directory replacement. This requires no extra CMS configuration keys. Child thumbnails now use the active child's public storage and include inherited resource files in their fingerprint. Standalone theme APIs, defaults, and thumbnail conventions are preserved. Full-page cache invalidation remains the host application's responsibility.
+
+## Earlier runtime modernization
+
+The earlier runtime modernization intentionally contains breaking changes; the instructions below apply to that migration.
 
 ## Runtime and dependencies
 

@@ -1,5 +1,6 @@
 <script type="text/javascript">
 
+const nativeLinkType = editor.DomComponents.getType('link');
 editor.DomComponents.addType('link', {
     model: {
         defaults: {
@@ -26,10 +27,45 @@ editor.DomComponents.addType('link', {
                     name: 'target',
                     options: [
                         {value: '_blank', name: '<?= phpb_trans('pagebuilder.yes') ?>'},
-                        {value: false, name: '<?= phpb_trans('pagebuilder.no') ?>'},
+                        // An empty target keeps navigation in the current tab. A
+                        // boolean false is stringified by the native select view
+                        // and can become target="false" instead of selecting No.
+                        {value: '', name: '<?= phpb_trans('pagebuilder.no') ?>'},
                     ],
                 }
             ],
+        },
+        init() {
+            // Saved HTML is parsed back into child components, while the
+            // changeProp trait reads the link model's content property. Seed
+            // that property silently so Settings shows the persisted label
+            // without rewriting the canvas or dirtying the page on load.
+            const content = this.get('content');
+            if ((content === null || content === undefined || content === '') &&
+                this.components().length > 0) {
+                this.set('content', this.getInnerHTML(), {silent: true});
+            }
+
+            // Parsed links keep their visible label as child components. The
+            // changeProp trait updates only the model's content property, so
+            // synchronize that value back into the rendered child collection.
+            this.on('change:content', this.updateContentFromTrait, this);
+        },
+        updateContentFromTrait() {
+            const content = this.get('content');
+            this.components(content === null || content === undefined ? '' : String(content));
+        },
+    },
+    view: {
+        updateContent() {
+            // updateContentFromTrait() replaces the child collection before
+            // GrapesJS handles change:content. The native view then sees that
+            // collection and clears the element, leaving the saved model right
+            // but the mounted canvas blank until reload. Collection events have
+            // already rendered the new child, so preserve it here.
+            if (this.model.components().length > 0) return;
+
+            nativeLinkType.view.prototype.updateContent.call(this);
         },
     },
 });

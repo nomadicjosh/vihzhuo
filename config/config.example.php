@@ -148,7 +148,11 @@ return [
         'class' => Vihzhuo\Theme::class,
         'folder' => __DIR__ . '/themes',
         'folder_url' => '/themes',
-        'active_theme' => 'demo'
+        'active_theme' => 'demo',
+        // Optional child => parent map. Parents may themselves have parents.
+        'parents' => [
+            // 'demo-child' => 'demo', // See examples/themes; also set active_theme to demo-child.
+        ]
     ],
 
     /*

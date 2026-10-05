@@ -17,9 +17,9 @@ use Exception;
  */
 class BlockAdapter
 {
-    protected ?PageRenderer $pageRenderer = null;
+    protected PageRenderer $pageRenderer;
 
-    protected ?ThemeBlock $block = null;
+    protected ThemeBlock $block;
 
     /**
      * BlockAdapter constructor.

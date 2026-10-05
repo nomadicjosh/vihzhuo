@@ -5,15 +5,18 @@ declare(strict_types=1);
 namespace Vihzhuo;
 
 use Vihzhuo\Contracts\ThemeContract;
+use Vihzhuo\Core\ThemeContext;
 
 class ThemeLayout
 {
     /** @var array<string, mixed> */
     protected array $config = [];
 
-    protected ?ThemeContract $theme = null;
+    protected ThemeContract $theme;
 
     protected string $layoutSlug;
+
+    private ThemeResource $resource;
 
     /**
      * Determines if a block was registered by an extension.
@@ -43,10 +46,20 @@ class ThemeLayout
         $this->layoutSlug = $layoutSlug;
         $this->isExtension = $isExtension;
         $this->extensionSlug = $extensionSlug;
-        if (file_exists($this->getFolder() . '/config.php')) {
-            $config = include $this->getFolder() . '/config.php';
-            $this->config = is_array($config) ? $this->stringKeyedArray($config) : [];
+        $this->resource = new ThemeResource(
+            $theme,
+            'layouts',
+            $isExtension ? ($extensionSlug ?? '') : $layoutSlug,
+            $isExtension ? $layoutSlug : null
+        );
+        // Preserve custom getFolder() implementations used by existing subclasses.
+        if ($this->getFolder() !== $this->resource->getFolder()) {
+            $this->resource = new ThemeResource($theme, 'layouts', '', $this->getFolder());
         }
+        $this->config = ThemeContext::run($theme, function (): array {
+            $this->resource->loadConfiguration(fn (string $file): mixed => require $file);
+            return $this->resource->getConfig();
+        });
     }
 
     /**
@@ -56,7 +69,7 @@ class ThemeLayout
      */
     public function getFolder(): string
     {
-        return ($this->isExtension) ? ($this->layoutSlug) : $this->theme->getFolder() . '/layouts/' . $this->layoutSlug;
+        return $this->resource->getFolder();
     }
 
     /**
@@ -66,7 +79,7 @@ class ThemeLayout
      */
     public function getViewFile(): string
     {
-        return $this->getFolder() . '/view.php';
+        return $this->resource->findFile(['view.php']) ?? $this->getFolder() . '/view.php';
     }
 
     /** Return the slug identifying this type of layout. */
@@ -106,14 +119,5 @@ class ThemeLayout
         }
 
         return $value;
-    }
-
-    /**
-     * @param array<mixed> $data
-     * @return array<string, mixed>
-     */
-    private function stringKeyedArray(array $data): array
-    {
-        return array_filter($data, 'is_string', ARRAY_FILTER_USE_KEY);
     }
 }

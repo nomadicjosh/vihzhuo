@@ -9,13 +9,13 @@ use Vihzhuo\Contracts\PageContract;
 use Vihzhuo\Contracts\ThemeContract;
 use Vihzhuo\Extensions;
 use Vihzhuo\ThemeBlock;
-use Vihzhuo\Core\View;
+use Vihzhuo\Core\ThemeContext;
 
 class BlockRenderer
 {
-    protected ?ThemeContract $theme = null;
+    protected ThemeContract $theme;
 
-    protected ?PageContract $page = null;
+    protected PageContract $page;
 
     protected bool $forPageBuilder;
 
@@ -84,30 +84,32 @@ class BlockRenderer
      */
     public function render(ThemeBlock $themeBlock, ?array $blockData = null, ?string $id = null): string
     {
-        $blockData = $blockData ?? [];
+        return ThemeContext::run($this->theme, function () use ($themeBlock, $blockData, $id): string {
+            $blockData = $blockData ?? [];
 
-        if ($themeBlock->isHtmlBlock()) {
-            $html = $this->renderHtmlBlock($themeBlock, $blockData);
-        } else {
-            $html = $this->renderDynamicBlock($themeBlock, $blockData);
-        }
+            if ($themeBlock->isHtmlBlock()) {
+                $html = $this->renderHtmlBlock($themeBlock, $blockData);
+            } else {
+                $html = $this->renderDynamicBlock($themeBlock, $blockData);
+            }
 
-        $wrapperElement = $themeBlock->getWrapperElement();
-        if ($this->forPageBuilder) {
-            $id = $id ?? $themeBlock->getSlug();
-            $html = '<phpb-block block-slug="' . phpb_e($themeBlock->getSlug()) . '" block-id="' . phpb_e($id) . '" wrapper="' . $wrapperElement . '" is-html="' . ($themeBlock->isHtmlBlock() ? 'true' : 'false') . '">'
-            . $html . $this->renderBuilderScript($themeBlock)
-            . '</phpb-block>';
-        } elseif (!$themeBlock->isHtmlBlock() && ($styleIdentifier = $this->styleIdentifier($blockData)) !== null) {
-            // add wrapper element around dynamic pagebuilder blocks, which receives the
-            // style identifier class if additional styling is added to the block via the pagebuilder
-            $html = '<' . $wrapperElement . ' class="' . phpb_e($styleIdentifier) . '">'
-            . $html . $this->renderScript($themeBlock)
-            . '</' . $wrapperElement . '>';
-        } else {
-            $html .= $this->renderScript($themeBlock);
-        }
-        return $html;
+            $wrapperElement = $themeBlock->getWrapperElement();
+            if ($this->forPageBuilder) {
+                $id = $id ?? $themeBlock->getSlug();
+                $html = '<phpb-block block-slug="' . phpb_e($themeBlock->getSlug()) . '" block-id="' . phpb_e($id) . '" wrapper="' . $wrapperElement . '" is-html="' . ($themeBlock->isHtmlBlock() ? 'true' : 'false') . '">'
+                . $html . $this->renderBuilderScript($themeBlock)
+                . '</phpb-block>';
+            } elseif (!$themeBlock->isHtmlBlock() && ($styleIdentifier = $this->styleIdentifier($blockData)) !== null) {
+                // add wrapper element around dynamic pagebuilder blocks, which receives the
+                // style identifier class if additional styling is added to the block via the pagebuilder
+                $html = '<' . $wrapperElement . ' class="' . phpb_e($styleIdentifier) . '">'
+                . $html . $this->renderScript($themeBlock)
+                . '</' . $wrapperElement . '>';
+            } else {
+                $html .= $this->renderScript($themeBlock);
+            }
+            return $html;
+        });
     }
 
     /**
@@ -122,7 +124,7 @@ class BlockRenderer
         $builderScriptFilePath = $themeBlock->getBuilderScriptFile();
         if ($builderScriptFilePath) {
             if (pathinfo($builderScriptFilePath, PATHINFO_EXTENSION) === 'php') {
-                $scriptHtmlString = View::render($builderScriptFilePath, ['renderer' => $this]);
+                $scriptHtmlString = ThemeContext::render($this->theme, $builderScriptFilePath, ['renderer' => $this]);
             } else {
                 $scriptHtmlString = (string) file_get_contents($builderScriptFilePath);
             }
@@ -145,7 +147,7 @@ class BlockRenderer
         $scriptFilePath = $themeBlock->getScriptFile();
         if ($scriptFilePath) {
             if (pathinfo($scriptFilePath, PATHINFO_EXTENSION) === 'php') {
-                $scriptHtmlString = View::render($scriptFilePath, ['renderer' => $this]);
+                $scriptHtmlString = ThemeContext::render($this->theme, $scriptFilePath, ['renderer' => $this]);
             } else {
                 $scriptHtmlString = (string) file_get_contents($scriptFilePath);
             }
@@ -264,13 +266,13 @@ class BlockRenderer
         // unset variables that should be inaccessible inside the view
         unset($controller, $model, $blockData);
 
-        $html = View::render($themeBlock->getViewFile(), compact(
-            'renderer',
-            'page',
-            'block',
-            'hasSkeleton',
-            'hasDynamicSkeleton'
-        ));
+        $html = ThemeContext::render($this->theme, $themeBlock->getViewFile(), [
+            'renderer' => $renderer,
+            'page' => $page,
+            'block' => $block,
+            'hasSkeleton' => $hasSkeleton,
+            'hasDynamicSkeleton' => $hasDynamicSkeleton,
+        ]);
 
         if ($hasSkeleton) {
             $className = 'skeleton-' . $themeBlock->getSlug() . ' skeleton-data';

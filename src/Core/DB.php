@@ -10,7 +10,7 @@ use RuntimeException;
 
 final class DB
 {
-    protected ?PDO $pdo = null;
+    protected PDO $pdo;
 
     /** @param array<string, mixed> $config */
     public function __construct(array $config)
@@ -68,7 +68,7 @@ final class DB
         return $this->executeSelect($query, $parameters);
     }
 
-    /** @param list<scalar|null> $parameters */
+    /** @param list<mixed> $parameters */
     public function query(string $query, array $parameters = []): bool
     {
         return $this->statement($query)->execute($parameters);

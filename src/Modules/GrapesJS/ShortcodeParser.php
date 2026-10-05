@@ -10,7 +10,7 @@ use Exception;
 
 class ShortcodeParser
 {
-    protected ?PageRenderer $pageRenderer = null;
+    protected PageRenderer $pageRenderer;
 
     /**
      * @var array<string, array<string, array<string, mixed>>> $renderedBlocks
@@ -58,7 +58,7 @@ class ShortcodeParser
     /**
      * Perform the tasks for all shortcodes in the given html string.
      *
-     * @param mixed $html
+     * @param string $html
      * @param array<string, mixed> $context
      * @param int $maxDepth
      * @return string
@@ -185,10 +185,13 @@ class ShortcodeParser
         }
 
         foreach ($matches as $match) {
-            $folderUrl = phpb_config('theme.folder_url');
-            $activeTheme = phpb_config('theme.active_theme');
-            $themeUrl = (is_string($folderUrl) ? $folderUrl : '/themes') . '/' . phpb_e($activeTheme);
-            $html = str_replace($match['shortcode'], $themeUrl, $html);
+            // Resolve each following asset path separately; parent assets can have different owners.
+            $pattern = '~' . preg_quote($match['shortcode'], '~') . '(?:/([^\s"\'<>\)\]]*))?~';
+            $html = preg_replace_callback($pattern, function (array $parts): string {
+                $path = html_entity_decode($parts[1] ?? '', ENT_QUOTES, 'UTF-8');
+                $url = $this->pageRenderer->getThemeAssetPath($path);
+                return phpb_e(isset($parts[1]) ? $url : rtrim($url, '/'), false);
+            }, $html) ?? $html;
         }
 
         return $html;

@@ -9,7 +9,7 @@ use Vihzhuo\ThemeBlock;
 
 class BaseModel
 {
-    protected ?ThemeBlock $block = null;
+    protected ThemeBlock $block;
 
     /**
      * @var array<string, mixed>

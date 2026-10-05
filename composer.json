@@ -38,8 +38,7 @@
         }
     },
     "require-dev": {
-        "qubus/qubus-coding-standard": "2.1.2",
-        "symfony/var-dumper": "^7.4"
+        "qubus/qubus-coding-standard": "^2"
     },
     "scripts": {
         "analyse": "phpstan analyse --debug --no-progress --memory-limit=1G",

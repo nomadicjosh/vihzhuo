@@ -110,6 +110,7 @@ The complete annotated example is in [`config/config.example.php`](config/config
 | `cache.class`                            | Class implementing `CacheContract`.                                                                             |
 | `theme.folder`                           | Absolute parent directory containing all themes.                                                                |
 | `theme.folder_url`                       | Public URL corresponding to `theme.folder`.                                                                     |
+| `theme.parents`                          | Optional map of child theme folder names to parent theme folder names.                                          |
 | `theme.active_theme`                     | Folder name of the active theme.                                                                                |
 | `router.class`                           | Class implementing `RouterContract`.                                                                            |
 | `class_replacements`                     | Map of concrete Vihzhuo classes to compatible application replacements.                                         |
@@ -376,6 +377,77 @@ Static HTML can use the equivalent shortcode:
 ```html
 <img src="[theme-url]/images/logo.svg" alt="Acme">
 ```
+
+### Child themes
+
+A child theme lives alongside its parent under `theme.folder`. Select the child as the active theme and declare its parent in the application config:
+
+```php
+'theme' => [
+    'class' => Vihzhuo\Theme::class,
+    'folder' => dirname(__DIR__) . '/public/themes',
+    'folder_url' => '/themes',
+    'active_theme' => 'acme-child',
+    'parents' => [
+        'acme-child' => 'acme',
+    ],
+],
+```
+
+The child only needs the files it changes. For example:
+
+```text
+public/themes/acme-child/
+├── blocks/hero/view.html       # overrides acme's hero view
+├── layouts/main/config.php    # overrides layout metadata; inherits its view
+└── images/logo.svg            # overrides the parent's logo
+```
+
+Blocks and layouts keep their existing slugs, so saved pages continue to work. The editor and public renderer both discover inherited resources. Each file is resolved in the child first, then its parent: views, models, controllers, public scripts, and builder scripts can come from different layers. A child `view.html` replaces a parent `view.php`, and a child `script.js` replaces a parent `script.php`. Within a single layer, the existing PHP-before-HTML-before-JavaScript preference remains. Builder scripts fall back to the effective public script when no builder script exists anywhere in the chain.
+
+Configuration maps merge recursively. Child scalars, nulls, lists, and empty arrays replace the corresponding parent value, allowing a child to clear inherited lists such as `whitelist`. For example, a child block can change only its title and keep the parent's settings:
+
+```php
+<?php
+return ['title' => 'My hero'];
+```
+
+To replace a block or layout entirely, put `inherit => false` in its child `config.php`. Parent files and configuration for that resource are then excluded. Supply a replacement view in the child:
+
+```php
+<?php
+return ['inherit' => false, 'title' => 'Replacement hero'];
+```
+
+When replacing a PHP model or controller, declare a distinct `namespace` in that layer's block config and use it in the PHP file. Inherited PHP files retain their source layer's namespace, even when the child supplies a different namespace for its own classes. This allows a child controller to work with a parent model without class-name collisions. An inherited template's `__DIR__` still points to its original directory; use `Theme::findFile()` to resolve custom partials through the theme chain rather than including them directly from `__DIR__`.
+
+`phpb_theme_asset('css/theme.css')` and `[theme-url]/css/theme.css` choose the nearest theme containing that asset. Query strings and fragments are preserved. Missing assets retain the child's URL. Bare `[theme-url]` retains the active theme URL; paths constructed later in JavaScript should be resolved through the asset helper when inheritance is needed. Assets referenced relatively inside CSS or JavaScript retain normal browser URL resolution; use an explicit asset URL when the referenced file may belong to another layer.
+
+Translations load the English fallback from oldest ancestor to child, then the requested locale in the same order. Child entries override parent entries within a locale, and localized entries override English fallbacks. Existing top-level translation merge behavior is preserved.
+
+Parents can themselves be children: add `'acme' => 'foundation'` to the same map for another layer. Every theme in an inheritance chain must exist under `theme.folder`. Cycles, invalid slugs, traversal paths, and symlinks escaping the configured theme/resource directory raise an exception before the affected file is loaded. Theme PHP files remain trusted application code.
+
+Existing standalone theme configs remain valid; omit `parents` or use an empty array. Existing `ThemeContract` implementations require no new methods. Custom themes can opt into inheritance with `ThemeInheritanceContract::getThemeFolders()`, returning a child-first map of theme slugs to folders. Extension registrations retain their existing priority over theme blocks and layouts.
+
+Clear existing page caches when changing the active theme or editing templates, as those caches contain previously rendered HTML.
+
+#### Integrating with Devflow or another CMS
+
+A CMS that already declares parent themes does not need a duplicate `parents` map in its Vihzhuo configuration. Keep the existing `theme.class`, `folder`, and `folder_url` settings. In the theme adapter that extends `Vihzhuo\Theme`:
+
+- Normalize the selected CMS theme identifier to its folder slug before calling the existing parent constructor. Resolve the theme selected for the current site or explicit preview, rather than assuming the configuration default is the selection.
+- Override `protected getParentThemeSlug(string $themeSlug): ?string` to ask the CMS's authoritative metadata/resolver for that theme's parent. Return the parent's normalized folder slug, or `null` for a root theme. Vihzhuo validates directories, slugs, and cycles while walking the resulting chain. Resolve every ancestor, not only the active theme.
+- To use whole-directory replacement, override `public inheritsResourceFiles(): bool` and return `false`. A matching child block/layout directory then supplies the entire resource; no parent configuration, model, controller, view, or script is mixed into it. No `inherit` setting is needed in individual resources. A config-only child layout in this mode must also supply its view.
+
+The default adapter methods retain the optional standalone `parents` map and file-level inheritance. These hooks change adapter code rather than adding CMS configuration keys. Assets and translations continue to fall back through the theme chain even when whole-directory replacement is selected for blocks/layouts. Existing extension registrations still take precedence.
+
+Devflow's Vihzhuo adapter belongs in `getdevflow/core`. Its parent resolver should use Devflow's real theme declaration; Vihzhuo neither infers parents from PHP class inheritance nor assumes a CMS metadata field name. The local adapter currently resolves active-theme names, so installing this Vihzhuo update alone does not wire CMS parent metadata into it.
+
+Devflow's Header Footer Builder uses `PageRenderer::renderBody()` with a `ThemeContract`. Supply the same metadata-aware theme adapter to the editor, public renderer, previews, and Header Footer Builder. Its relative canvas assets use `phpb_theme_asset()`, which can resolve parents through the configured adapter without extra asset settings.
+
+Child thumbnail paths and URLs point into the active child's `block-thumbs/` directory. Their fingerprint includes resource layer paths and configuration, views, models, controllers, and script files, so inherited code/config changes also generate a new thumbnail name. Existing standalone thumbnail conventions are preserved. This fingerprint tracks resource files; changes to external assets, request-dependent configuration, or model data can still require regenerating thumbnails.
+
+Full-page caches retain their existing API and behavior. The CMS should clear its existing page cache when activating a theme or editing inherited templates. No cache configuration additions are required. Devflow integration tests should cover a real metadata declaration and activation workflow, site-specific theme selection, public pages, editor enumeration, inherited PHP namespaces, Header Footer Builder previews, and canvas asset fallback. The library tests cover the shared adapter hooks and rendering behavior; they do not boot Devflow.
 
 ## Creating a layout
 

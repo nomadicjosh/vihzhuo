@@ -8,9 +8,9 @@ use Vihzhuo\Contracts\PageContract;
 
 class BaseController
 {
-    protected ?BaseModel $model = null;
+    protected BaseModel $model;
 
-    protected ?PageContract $page = null;
+    protected PageContract $page;
 
     protected bool $forPageBuilder;
 

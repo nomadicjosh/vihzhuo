@@ -9,15 +9,18 @@ use Vihzhuo\Contracts\PageContract;
 use Vihzhuo\Contracts\ThemeContract;
 use Vihzhuo\Modules\GrapesJS\Block\BlockRenderer;
 use Vihzhuo\ThemeBlock;
+use Vihzhuo\ThemeLayout;
+use Vihzhuo\Theme;
+use Vihzhuo\ThemeResource;
 use Exception;
 use Vihzhuo\Extensions;
-use Vihzhuo\Core\View;
+use Vihzhuo\Core\ThemeContext;
 
 class PageRenderer
 {
-    protected ?ThemeContract $theme = null;
+    protected ThemeContract $theme;
 
-    protected ?PageContract $page = null;
+    protected PageContract $page;
 
     /**
      * @var array<string, mixed>  $pageData
@@ -29,7 +32,7 @@ class PageRenderer
      */
     protected array $pageBlocksData = [];
 
-    protected ?ShortcodeParser $shortcodeParser = null;
+    protected ShortcodeParser $shortcodeParser;
 
     protected bool $forPageBuilder;
 
@@ -105,14 +108,30 @@ class PageRenderer
      */
     public function getPageLayoutPath(): ?string
     {
-        $layout = basename($this->page->getLayout());
-        $layoutPath = $this->theme->getFolder() . '/layouts/' . $layout . '/view.php';
-
-        if ($path = Extensions::getLayout($layout)) {
-            $layoutPath = $path . '/view.php';
+        $layout = $this->page->getLayout();
+        if ($layout === '') {
+            return null;
         }
+        $path = Extensions::getLayout($layout);
+        $themeLayout = new ThemeLayout($this->theme, $path ?? $layout, $path !== null, $path !== null ? $layout : null);
+        $file = $themeLayout->getViewFile();
+        return is_file($file) ? $file : null;
+    }
 
-        return file_exists($layoutPath) ? $layoutPath : null;
+    /** Resolve assets using the renderer's theme, including themes supplied with setTheme(). */
+    public function getThemeAssetPath(string $path): string
+    {
+        if ($this->theme instanceof Theme) {
+            return $this->theme->getAssetPath($path);
+        }
+        $folderUrl = phpb_config('theme.folder_url');
+        $activeTheme = phpb_config('theme.active_theme');
+        return ThemeResource::assetPath(
+            $this->theme,
+            $path,
+            is_string($folderUrl) ? $folderUrl : '/themes',
+            is_string($activeTheme) ? $activeTheme : ''
+        );
     }
 
     /**
@@ -184,7 +203,11 @@ class PageRenderer
 
         $layoutPath = $this->getPageLayoutPath();
         if ($layoutPath) {
-            $pageHtml = View::render($layoutPath, compact('renderer', 'page', 'body'));
+            $pageHtml = ThemeContext::render($this->theme, $layoutPath, [
+                'renderer' => $renderer,
+                'page' => $page,
+                'body' => $body,
+            ]);
         } else {
             $pageHtml = $body;
         }

@@ -27,7 +27,7 @@ class UploadRepository extends BaseRepository
     /**
      * Create a new uploaded file.
      *
-     * @param array<string, mixed> $data
+     * @param array<string, bool|float|int|string|null> $data
      * @return UploadedFile|false|null
      * @throws ReflectionException
      */

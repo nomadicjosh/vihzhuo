@@ -9,6 +9,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Qubus\Http\Factories\HtmlResponseFactory;
 use Qubus\Http\Factories\TextResponseFactory;
+use ReflectionException;
 use Vihzhuo\Contracts\PageContract;
 use Vihzhuo\Contracts\WebsiteManagerContract;
 use Vihzhuo\Core\View;
@@ -118,6 +119,7 @@ class WebsiteManager implements WebsiteManagerContract
      *
      * @param PageContract $page
      * @return ResponseInterface
+     * @throws ReflectionException
      */
     public function handleDestroy(PageContract $page): ResponseInterface
     {
@@ -131,6 +133,8 @@ class WebsiteManager implements WebsiteManagerContract
 
     /**
      * Handle requests for updating the website settings.
+     *
+     * @throws ReflectionException
      */
     public function handleUpdateSettings(ServerRequestInterface $request): ResponseInterface
     {

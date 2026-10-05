@@ -1,4 +1,5 @@
 import {activateSidebarTab, renderEmptyTraitsMessage} from './sidebar-panels';
+import {resolveSerializedBlockId} from './block-settings';
 import {
     enableEditableInteraction,
     findInteractiveSelectionTarget,
@@ -578,25 +579,22 @@ import {
         component.attributes['is-updating'] = false;
     }
 
-    /**
-     * On updating an attribute (block setting from the settings side panel), refresh dynamic block via Ajax.
-     */
-    window.editor.on('component:update', function(component) {
-        if (window.isLoaded !== true ||
-            component.attributes['block-slug'] === undefined ||
-            component.attributes['is-updating'] ||
-            component.changed['attributes'] === undefined ||
-            $(".gjs-frame").contents().find("#" + component.ccid).length === 0
-        ) {
-            return;
-        }
+    // Text traits can emit an update for every keystroke. Rerendering immediately
+    // caused the first request to replace the component while later input was
+    // still attached to the old model. Debounce idle input and retain one latest
+    // snapshot when changes arrive during an in-flight request.
+    const dynamicBlockUpdateStates = new WeakMap();
+    const dynamicBlockUpdateDelay = 250;
 
-        // dynamic pagebuilder blocks can depend on data passed by dynamic parent blocks,
-        // so we need to update the closest parent which does not have a dynamic parent itself or the block that is inside a blocks container.
-        // also keep track of all intermediate block ids, for re-selecting the currently selected component.
+    /**
+     * Resolve the dynamic ancestor that must be rerendered and retain the path
+     * used to restore selection after its component model is replaced.
+     */
+    function getDynamicBlockUpdateContext(component) {
         let relativeIds = [];
         let ancestorToUpdate = component;
         let hasDynamicAncestor = false;
+
         while (ancestorToUpdate.parent() &&
             ancestorToUpdate.parent().attributes.attributes['phpb-blocks-container'] === undefined &&
             ancestorToUpdate.parent().attributes['is-html'] !== 'true' &&
@@ -611,19 +609,63 @@ import {
             ancestorToUpdate = ancestorToUpdate.parent();
         }
 
-        if (hasDynamicAncestor) {
-            component = ancestorToUpdate;
-        } else {
-            relativeIds = [];
+        return hasDynamicAncestor
+            ? {component: ancestorToUpdate, relativeIds}
+            : {component, relativeIds: []};
+    }
+
+    /**
+     * Queue a server rerender after the current group of trait changes settles.
+     */
+    function queueDynamicBlockUpdate(component, relativeIds) {
+        let state = dynamicBlockUpdateStates.get(component);
+        if (! state) {
+            state = {timer: null, inFlight: false, pendingData: null, pendingRelativeIds: []};
+            dynamicBlockUpdateStates.set(component, state);
         }
 
+        if (state.inFlight) {
+            // Keep only the newest complete snapshot. It contains every trait,
+            // including empty strings and false-like select values.
+            state.pendingData = window.getComponentDataInStorageFormat(component);
+            state.pendingRelativeIds = [...relativeIds];
+            return;
+        }
+
+        window.clearTimeout(state.timer);
+        state.timer = window.setTimeout(function() {
+            refreshDynamicBlock(component, relativeIds, state);
+        }, dynamicBlockUpdateDelay);
+    }
+
+    /**
+     * Refresh a dynamic block from its current or queued storage snapshot.
+     */
+    function refreshDynamicBlock(component, relativeIds, state, queuedData = null) {
+        if (! component.parent() || ! component.getEl()) {
+            dynamicBlockUpdateStates.delete(component);
+            return;
+        }
+
+        state.timer = null;
+        state.inFlight = true;
         component.attributes['is-updating'] = true;
-        $(".gjs-frame").contents().find("#" + component.ccid).addClass('gjs-freezed');
+        $(component.getEl()).addClass('gjs-freezed');
 
-        let container = window.editor.getWrapper().find("#" + component.ccid)[0].parent();
-        let data = window.getComponentDataInStorageFormat(component);
+        const container = component.parent();
+        const data = queuedData || window.getComponentDataInStorageFormat(component);
+        const serializedBlockId = resolveSerializedBlockId(
+            getComponentBlockId(component),
+            data.blocks
+        );
 
-        // refresh component contents with updated version requested via ajax call
+        // Promote the temporary slug-based ID before the request begins. This
+        // keeps changes made while the request is in flight on the same block
+        // key instead of generating a second ID from the old live component.
+        if (serializedBlockId && getComponentBlockId(component) !== serializedBlockId) {
+            component.attributes['block-id'] = serializedBlockId;
+        }
+
         $.ajax({
             type: "POST",
             url: window.renderBlockUrl,
@@ -635,7 +677,10 @@ import {
                 // Preserve the stable instance ID. Treating an HTML response
                 // as one jQuery root can return no ID in GrapesJS 0.23 when
                 // the parsed response contains multiple nodes.
-                let blockId = getComponentBlockId(component);
+                let blockId = resolveSerializedBlockId(
+                    getComponentBlockId(component),
+                    data.blocks
+                );
                 if (! blockId) {
                     blockId = $('<container>').append(blockHtml)
                         .find('phpb-block[block-id]').first().attr('block-id');
@@ -643,38 +688,84 @@ import {
                 if (! blockId) {
                     $(component.getEl()).removeClass('gjs-freezed');
                     component.attributes['is-updating'] = false;
+                    state.inFlight = false;
+                    dynamicBlockUpdateStates.delete(component);
                     window.toastr.error(window.translations['toastr-component-update-failed']);
                     return;
                 }
 
-                // set the block settings for the updated component to the new values
+                // Set the block settings for the updated component to the exact
+                // snapshot used for this response.
                 window.pageBlocks[window.currentLanguage][blockId] = (data.blocks[blockId] === undefined) ? {} : data.blocks[blockId];
 
-                // replace old component for the rendered html returned by the server
                 let replacedComponent = replaceWithFirst(component, blockHtml);
                 replacedComponent = replacePlaceholdersForRenderedBlocks(replacedComponent);
                 replacedComponent = applyBlockAttributesToComponents(replacedComponent);
                 restrictEditAccess(container, false, false);
 
-                // run builder scripts of the replaced component and all its children
                 replacedComponent = findChildViaBlockIdsPath(container, [blockId]) || replacedComponent;
                 window.runScriptsOfComponentAndChildren(replacedComponent);
 
-                // select the component that was selected before the ajax call
                 relativeIds.push(blockId);
                 let componentToSelect = findChildViaBlockIdsPath(container, relativeIds.reverse());
                 window.editor.select(componentToSelect || replacedComponent, {forceChange: true});
 
-                // trigger resize event to ensure all components are updated based on the new block settings
                 let iframeWindow = document.querySelector('iframe').contentWindow;
                 iframeWindow.dispatchEvent(new Event('resize'));
+
+                const pendingData = state.pendingData;
+                const pendingRelativeIds = state.pendingRelativeIds;
+                state.pendingData = null;
+                state.pendingRelativeIds = [];
+                state.inFlight = false;
+                dynamicBlockUpdateStates.delete(component);
+
+                if (pendingData) {
+                    dynamicBlockUpdateStates.set(replacedComponent, state);
+                    refreshDynamicBlock(replacedComponent, pendingRelativeIds, state, pendingData);
+                }
             },
             error: function() {
-                $(".gjs-frame").contents().find("#" + component.ccid).removeClass('gjs-freezed');
+                $(component.getEl()).removeClass('gjs-freezed');
                 component.attributes['is-updating'] = false;
+                state.inFlight = false;
+
+                const pendingData = state.pendingData;
+                const pendingRelativeIds = state.pendingRelativeIds;
+                state.pendingData = null;
+                state.pendingRelativeIds = [];
+
+                if (pendingData) {
+                    refreshDynamicBlock(component, pendingRelativeIds, state, pendingData);
+                } else {
+                    dynamicBlockUpdateStates.delete(component);
+                }
                 window.toastr.error(window.translations['toastr-component-update-failed']);
             }
         });
+    }
+
+    /**
+     * On updating a configured attribute, rerender dynamic PHP blocks only.
+     * HTML blocks (including links) are edited and saved entirely client-side.
+     */
+    window.editor.on('component:update', function(component) {
+        if (window.isLoaded !== true ||
+            component.attributes['block-slug'] === undefined ||
+            component.attributes['is-html'] !== 'false' ||
+            component.changed['attributes'] === undefined ||
+            $(".gjs-frame").contents().find("#" + component.ccid).length === 0
+        ) {
+            return;
+        }
+
+        const updateContext = getDynamicBlockUpdateContext(component);
+        const state = dynamicBlockUpdateStates.get(updateContext.component);
+        if (component.attributes['is-updating'] && ! state?.inFlight) {
+            return;
+        }
+
+        queueDynamicBlockUpdate(updateContext.component, updateContext.relativeIds);
     });
 
     /**

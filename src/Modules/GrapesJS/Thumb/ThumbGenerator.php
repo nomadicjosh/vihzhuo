@@ -18,7 +18,7 @@ use Exception;
 
 class ThumbGenerator
 {
-    protected ?ThemeContract $theme = null;
+    protected ThemeContract $theme;
 
     /**
      * ThumbGenerator constructor.

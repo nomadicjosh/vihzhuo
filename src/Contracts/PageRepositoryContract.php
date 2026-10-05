@@ -10,7 +10,7 @@ interface PageRepositoryContract
      * Create a new page.
      *
      * @param array<string, mixed> $data
-     * @return bool|object
+     * @return PageContract|false
      */
     public function create(array $data): PageContract|false;
 

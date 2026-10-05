@@ -90,10 +90,17 @@ class Vihzhuo
         $translations = require $languageFile;
         $phpb_translations = is_array($translations) ? $this->stringKeyedArray($translations) : [];
 
-        $themeFolder = $this->configString('theme.folder') . '/' . $this->configString('theme.active_theme') . '/translations';
+        $theme = $this->theme;
+        if ($theme === null && $this->configString('theme.active_theme') !== '') {
+            $theme = new Theme($this->configArray('theme'), $this->configString('theme.active_theme'));
+        }
+        $folders = $theme !== null ? ThemeResource::themeFolders($theme) : [];
         foreach (array_unique(['en', $language]) as $locale) {
-            $file = $themeFolder . '/' . $locale . '.php';
-            if (is_file($file)) {
+            foreach (array_reverse($folders) as $folder) {
+                $file = ThemeResource::findInFolder($folder, 'translations/' . $locale . '.php');
+                if ($file === null) {
+                    continue;
+                }
                 $themeTranslations = require $file;
                 if (is_array($themeTranslations)) {
                     $phpb_translations = array_merge($phpb_translations, $this->stringKeyedArray($themeTranslations));

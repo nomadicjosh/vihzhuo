@@ -56,6 +56,15 @@
         }
         window.VihzhuoGrapesJS.styleManager.installAdvancedSector(editor, 'Advanced');
 
+        const resolveSerializedBlockId = window.VihzhuoGrapesJS.blockSettings.resolveSerializedBlockId;
+        const firstInstanceId = 'IDFIRSTSETTING0001';
+        if (resolveSerializedBlockId('example-page-banner', {[firstInstanceId]: {settings: {}}}) !== firstInstanceId ||
+            resolveSerializedBlockId(firstInstanceId, {[firstInstanceId]: {settings: {}}}) !== firstInstanceId ||
+            resolveSerializedBlockId('example-page-banner', {}) !== null) {
+            throw new Error('First-setting serialization did not promote and retain the permanent block ID.');
+        }
+
+        const nativeLinkType = editor.DomComponents.getType('link');
         editor.DomComponents.addType('link', {
             model: {
                 defaults: {
@@ -68,10 +77,29 @@
                             name: 'target',
                             options: [
                                 {value: '_blank', name: 'Yes'},
-                                {value: false, name: 'No'},
+                                {value: '', name: 'No'},
                             ],
                         },
                     ],
+                },
+                init() {
+                    const content = this.get('content');
+                    if ((content === null || content === undefined || content === '') &&
+                        this.components().length > 0) {
+                        this.set('content', this.getInnerHTML(), {silent: true});
+                    }
+
+                    this.on('change:content', this.updateContentFromTrait, this);
+                },
+                updateContentFromTrait() {
+                    const content = this.get('content');
+                    this.components(content === null || content === undefined ? '' : String(content));
+                },
+            },
+            view: {
+                updateContent() {
+                    if (this.model.components().length > 0) return;
+                    nativeLinkType.view.prototype.updateContent.call(this);
                 },
             },
         });
@@ -98,9 +126,26 @@
             const traitNames = link.get('traits').map((trait) => trait.get('name')).join(', ');
             throw new Error(`Custom link traits were not initialized (type: ${link.get('type')}; traits: ${traitNames}).`);
         }
+        if (link.getTrait('content').getValue() !== 'Read docs') {
+            throw new Error(`Saved link text was not hydrated into Settings (${String(link.getTrait('content').getValue())}).`);
+        }
+        link.getTrait('content').setValue('Updated link text');
+        link.getTrait('href').setValue('/updated-docs');
+        link.getTrait('target').setValue('_blank');
+        link.getTrait('target').setValue('');
+        const updatedLinkHtml = link.toHTML();
+        const updatedTarget = link.getTrait('target').getTargetValue();
+        if (!updatedLinkHtml.includes('Updated link text') ||
+            !updatedLinkHtml.includes('href="/updated-docs"') ||
+            updatedTarget !== '') {
+            throw new Error(
+                `Sequential link trait updates failed (HTML: ${updatedLinkHtml}; target: ${String(updatedTarget)}).`
+            );
+        }
         if (!image.getTrait('title') || image.getTrait('alt').getValue() !== 'Test image') {
             throw new Error('Custom image traits were not initialized from attributes.');
         }
+        result.textContent = 'Link trait checks passed; running remaining editor checks…';
 
         const styledText = editor.addComponents('<p id="rte-smoke-text" style="width: fit-content; margin: 0">Short</p>')[0];
         const embeddedBlock = editor.addComponents(
@@ -108,6 +153,12 @@
         )[0];
         setTimeout(async () => {
             try {
+                const updatedLinkCanvasText = document.querySelector('.gjs-frame')
+                    ?.contentDocument?.querySelector('a[href="/updated-docs"]')?.textContent;
+                if (updatedLinkCanvasText !== 'Updated link text') {
+                    throw new Error(`Link text was saved in the model but not rendered in the canvas (${String(updatedLinkCanvasText)}).`);
+                }
+
                 const rteActions = editor.RichTextEditor.getAll().map(action => action.name);
                 if (!['link', 'fontColor', 'fontSize', 'source'].every(action => rteActions.includes(action))) {
                     throw new Error(`Expected built-in RTE actions were not initialized (${rteActions.join(', ')}).`);

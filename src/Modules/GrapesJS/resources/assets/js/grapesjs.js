@@ -13,6 +13,7 @@ import {
     synchronizeStyleTarget,
 } from './component-interactions';
 import {installAdvancedSector, mountSelectorManager} from './style-manager-extensions';
+import {resolveSerializedBlockId} from './block-settings';
 
 window.grapesjs = grapesjs;
 window.VihzhuoGrapesJS = Object.freeze({
@@ -38,5 +39,8 @@ window.VihzhuoGrapesJS = Object.freeze({
     styleManager: Object.freeze({
         installAdvancedSector,
         mountSelectorManager,
+    }),
+    blockSettings: Object.freeze({
+        resolveSerializedBlockId,
     }),
 });

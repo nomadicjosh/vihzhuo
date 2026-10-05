@@ -78,6 +78,28 @@ if (! function_exists('phpb_theme_asset')) {
      */
     function phpb_theme_asset(string $path): string
     {
+        $currentTheme = \Vihzhuo\Core\ThemeContext::current();
+        if ($currentTheme instanceof \Vihzhuo\Theme) {
+            return $currentTheme->getAssetUrl($path);
+        }
+        $themeConfig = phpb_config('theme');
+        $themeSlug = phpb_config('theme.active_theme');
+        if (is_array($themeConfig) && is_string($themeSlug) && $themeSlug !== '') {
+            $theme = $currentTheme ?? phpb_instance('theme', [$themeConfig, $themeSlug])
+            ?? new \Vihzhuo\Theme(array_filter($themeConfig, 'is_string', ARRAY_FILTER_USE_KEY), $themeSlug);
+            if ($theme instanceof \Vihzhuo\Theme) {
+                return $theme->getAssetUrl($path);
+            }
+            if ($theme instanceof \Vihzhuo\Contracts\ThemeInheritanceContract) {
+                $base = $themeConfig['folder_url'] ?? '/themes';
+                return phpb_full_url(\Vihzhuo\ThemeResource::assetPath(
+                    $theme,
+                    $path,
+                    is_string($base) ? $base : '/themes',
+                    $themeSlug
+                ));
+            }
+        }
         $folderUrl = phpb_config('theme.folder_url');
         $activeTheme = phpb_config('theme.active_theme');
         $themeFolder = (is_string($folderUrl) ? $folderUrl : '/themes') . '/' . (is_string($activeTheme) ? $activeTheme : '');

@@ -33,7 +33,7 @@ abstract class BaseRepository
     }
 
     /**
-     * @param array<string, scalar|null> $data
+     * @param array<string, mixed> $data
      * @throws ReflectionException
      */
     protected function createRecord(array $data): ?object
@@ -48,7 +48,9 @@ abstract class BaseRepository
         return $id !== '' ? $this->findWithId($id) : null;
     }
 
-    /** @param array<string, scalar|null> $data */
+    /**
+     * @param array<string, mixed> $data
+     */
     protected function updateRecord(object $instance, array $data): bool
     {
         $set = implode(', ', array_map(fn (string $column): string => $this->identifier($column) . '=?', array_keys($data)));
